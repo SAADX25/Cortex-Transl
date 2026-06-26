@@ -6,6 +6,7 @@ using CortexTransl.App.Services.Ocr;
 using CortexTransl.App.Services.Overlay;
 using CortexTransl.App.Services.Profiles;
 using CortexTransl.App.Services.Translation;
+using CortexTransl.App.Services.Settings;
 using CortexTransl.App.Utils;
 using CortexTransl.App.ViewModels;
 using System.Windows;
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
         var timingLogger = new TimingLogger(paths.LogPath);
         var cacheRepository = new SqliteTranslationCacheRepository(connectionFactory);
         var profileRepository = new SqliteGameProfileRepository(connectionFactory);
+        var appSettingsService = new AppSettingsService(paths.DataDirectory);
         var translationProviderSettings = new TranslationProviderSettings();
         var pipeline = new CaptureTranslatePipeline(
             new ScreenCaptureService(),
@@ -46,6 +48,7 @@ public partial class MainWindow : Window
             new OverlayService(),
             profileRepository,
             translationProviderSettings,
+            appSettingsService,
             timingLogger);
 
         DataContext = _viewModel;
@@ -59,6 +62,8 @@ public partial class MainWindow : Window
         try
         {
             await _viewModel.InitializeAsync();
+
+            ApiKeyPasswordBox.Password = _viewModel.DeepLApiKey;
 
             if (_hotkeyService.Register(this, Key.F8))
             {
@@ -74,6 +79,30 @@ public partial class MainWindow : Window
         {
             _viewModel.SetStatus($"Startup failed: {ex.Message}");
             MessageBox.Show(this, ex.Message, "Cortex Transl startup failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.DeepLApiKey != ApiKeyPasswordBox.Password)
+        {
+            _viewModel.DeepLApiKey = ApiKeyPasswordBox.Password;
+        }
+    }
+
+    private void ToggleApiKeyVisibility_Click(object sender, RoutedEventArgs e)
+    {
+        if (ApiKeyPasswordBox.Visibility == Visibility.Visible)
+        {
+            ApiKeyTextBox.Text = ApiKeyPasswordBox.Password;
+            ApiKeyPasswordBox.Visibility = Visibility.Collapsed;
+            ApiKeyTextBox.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ApiKeyPasswordBox.Password = ApiKeyTextBox.Text;
+            ApiKeyTextBox.Visibility = Visibility.Collapsed;
+            ApiKeyPasswordBox.Visibility = Visibility.Visible;
         }
     }
 

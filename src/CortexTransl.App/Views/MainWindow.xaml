@@ -1,199 +1,489 @@
 <Window x:Class="CortexTransl.App.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Cortex Transl"
-        Width="1080"
-        Height="760"
-        MinWidth="900"
-        MinHeight="640"
-        WindowStartupLocation="CenterScreen">
-    <Grid Background="{StaticResource SurfaceBrush}">
+        Title="Cortex Transl — Real-time Game Dialogue Translator"
+        Width="1140"
+        Height="800"
+        MinWidth="960"
+        MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource SurfaceBrush}">
+
+    <Grid>
         <Grid.RowDefinitions>
+            <!-- Top header bar -->
             <RowDefinition Height="Auto" />
+            <!-- Main content -->
             <RowDefinition Height="*" />
+            <!-- Status footer -->
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,0,0,1" Padding="16,12">
+        <!-- ═══════════════════════════════ TOP HEADER ═══════════════════════════════ -->
+        <Border Grid.Row="0"
+                Background="White"
+                BorderBrush="{StaticResource BorderBrushSoft}"
+                BorderThickness="0,0,0,1"
+                Padding="20,12">
             <DockPanel LastChildFill="False">
-                <StackPanel DockPanel.Dock="Left">
-                    <TextBlock Text="Cortex Transl" FontSize="22" FontWeight="SemiBold" Foreground="#111827" />
-                    <TextBlock Text="{Binding SelectedRegionDisplay}" Foreground="#475569" Margin="0,4,0,0" />
+
+                <!-- App identity -->
+                <StackPanel DockPanel.Dock="Left" Orientation="Vertical" VerticalAlignment="Center">
+                    <TextBlock Text="Cortex Transl"
+                               FontSize="20"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource TextPrimary}" />
+                    <TextBlock Text="Real-time game dialogue translator"
+                               FontSize="12"
+                               Foreground="{StaticResource TextMuted}"
+                               Margin="0,2,0,0" />
                 </StackPanel>
+
+                <!-- Region + quick action buttons -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="Select Region" Command="{Binding SelectRegionCommand}" />
-                    <Button Content="Capture &amp; Translate" Command="{Binding CaptureAndTranslateCommand}" Background="{StaticResource AccentBrush}" Foreground="White" />
+
+                    <!-- Region display pill -->
+                    <Border Background="#EFF6FF"
+                            BorderBrush="#BFDBFE"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="10,5"
+                            Margin="0,0,12,0"
+                            VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="📍 "
+                                       FontSize="12"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding SelectedRegionDisplay}"
+                                       FontSize="12"
+                                       Foreground="#1D4ED8"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+
+                    <Button Content="📐  Select Region"
+                            Command="{Binding SelectRegionCommand}"
+                            MinWidth="130"
+                            ToolTip="Draw a region on screen to capture dialogue" />
+
+                    <Button Content="⚡  Capture Once"
+                            Style="{StaticResource AccentButton}"
+                            Command="{Binding CaptureAndTranslateCommand}"
+                            MinWidth="130"
+                            ToolTip="Capture and translate the selected region once (F8)" />
                 </StackPanel>
             </DockPanel>
         </Border>
 
-        <Grid Grid.Row="1" Margin="16">
+        <!-- ═══════════════════════════════ MAIN BODY ════════════════════════════════ -->
+        <Grid Grid.Row="1" Margin="16,12,16,0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="330" />
-                <ColumnDefinition Width="16" />
+                <!-- Left sidebar -->
+                <ColumnDefinition Width="310" />
+                <ColumnDefinition Width="12" />
+                <!-- Right main area -->
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+            <!-- ───────────────────── LEFT SIDEBAR ───────────────────── -->
+            <ScrollViewer Grid.Column="0"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
-                    <GroupBox Header="Settings" Padding="12" Margin="0,0,0,12">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="120" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Source" VerticalAlignment="Center" Margin="0,0,8,8" />
-                            <ComboBox Grid.Row="0" Grid.Column="1"
-                                      Margin="0,0,0,8"
-                                      ItemsSource="{Binding SourceLanguageOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding SourceLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Target" VerticalAlignment="Center" Margin="0,0,8,8" />
-                            <ComboBox Grid.Row="1" Grid.Column="1"
-                                      Margin="0,0,0,8"
-                                      ItemsSource="{Binding TargetLanguageOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding TargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="OCR" VerticalAlignment="Center" Margin="0,0,8,8" />
-                            <ComboBox Grid.Row="2" Grid.Column="1"
-                                      Margin="0,0,0,8"
-                                      ItemsSource="{Binding OcrEngineOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding OcrEngine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Provider" VerticalAlignment="Center" Margin="0,0,8,8" />
-                            <ComboBox Grid.Row="3" Grid.Column="1"
-                                      Margin="0,0,0,8"
-                                      ItemsSource="{Binding TranslationProviderOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding TranslationProvider, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="API key" VerticalAlignment="Center" Margin="0,0,8,8" />
-                            <TextBox Grid.Row="4" Grid.Column="1"
-                                     AutomationProperties.AutomationId="DeepLApiKey"
-                                     Text="{Binding DeepLApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                     Margin="0,0,0,8" />
-
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="API type" VerticalAlignment="Center" Margin="0,0,8,8" />
-                            <CheckBox Grid.Row="5" Grid.Column="1"
-                                      Content="DeepL Free"
-                                      IsChecked="{Binding UseDeepLFreeApi, Mode=TwoWay}"
-                                      VerticalAlignment="Center"
-                                      Margin="0,0,0,8" />
-
-                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Font size" VerticalAlignment="Center" Margin="0,0,8,8" />
-                            <DockPanel Grid.Row="6" Grid.Column="1" Margin="0,0,0,8">
-                                <TextBlock DockPanel.Dock="Right" Text="{Binding OverlayFontSize, StringFormat={}{0:0}}" Width="34" TextAlignment="Right" VerticalAlignment="Center" />
-                                <Slider Minimum="18" Maximum="56" TickFrequency="2" IsSnapToTickEnabled="True" Value="{Binding OverlayFontSize, Mode=TwoWay}" />
-                            </DockPanel>
-
-                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Opacity" VerticalAlignment="Center" Margin="0,0,8,0" />
-                            <DockPanel Grid.Row="7" Grid.Column="1">
-                                <TextBlock DockPanel.Dock="Right" Text="{Binding OverlayOpacity, StringFormat={}{0:P0}}" Width="44" TextAlignment="Right" VerticalAlignment="Center" />
-                                <Slider Minimum="0.35" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding OverlayOpacity, Mode=TwoWay}" />
-                            </DockPanel>
-                        </Grid>
-                    </GroupBox>
-
-                    <GroupBox Header="Profile" Padding="12" Margin="0,0,0,12">
+                    <!-- ▌ HOW TO USE -->
+                    <Border Style="{StaticResource Card}" Background="#EFF6FF" BorderBrush="#BFDBFE">
                         <StackPanel>
-                            <TextBlock Text="Name" Margin="0,0,0,4" />
+                            <TextBlock Text="HOW TO USE" Style="{StaticResource SectionHeader}" Foreground="#1D4ED8" />
+                            <TextBlock FontSize="12" Foreground="#1E40AF" LineHeight="20">
+                                <Run>①</Run><Run FontWeight="SemiBold"> Select Region</Run><Run> — draw around dialogue</Run>
+                            </TextBlock>
+                            <TextBlock FontSize="12" Foreground="#1E40AF" LineHeight="20">
+                                <Run>②</Run><Run FontWeight="SemiBold"> Choose Provider</Run><Run> — Placeholder or DeepL</Run>
+                            </TextBlock>
+                            <TextBlock FontSize="12" Foreground="#1E40AF" LineHeight="20">
+                                <Run>③</Run><Run FontWeight="SemiBold"> Capture Once</Run><Run> or </Run><Run FontWeight="SemiBold">Start Auto Translate</Run>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ▌ TRANSLATION SETUP -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="TRANSLATION SETUP" Style="{StaticResource SectionHeader}" />
+
+                            <TextBlock Text="Source Language" Style="{StaticResource FieldLabel}" />
+                            <ComboBox ItemsSource="{Binding SourceLanguageOptions}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding SourceLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,0,0,10" />
+
+                            <TextBlock Text="Target Language" Style="{StaticResource FieldLabel}" />
+                            <ComboBox ItemsSource="{Binding TargetLanguageOptions}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding TargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,0,0,10" />
+
+                            <TextBlock Text="OCR Engine" Style="{StaticResource FieldLabel}" />
+                            <ComboBox ItemsSource="{Binding OcrEngineOptions}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding OcrEngine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,0,0,10" />
+
+                            <TextBlock Text="Translation Provider" Style="{StaticResource FieldLabel}" />
+                            <ComboBox ItemsSource="{Binding TranslationProviderOptions}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding TranslationProvider, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,0,0,4" />
+                            <TextBlock Text="{Binding ProviderHint}"
+                                       Style="{StaticResource HintText}"
+                                       Margin="0,0,0,10" />
+
+                            <TextBlock Text="DeepL API Key" Style="{StaticResource FieldLabel}" />
+                            <DockPanel Margin="0,0,0,4">
+                                <Button DockPanel.Dock="Right"
+                                        Content="👁"
+                                        Width="32"
+                                        MinHeight="30"
+                                        Margin="4,0,0,0"
+                                        Click="ToggleApiKeyVisibility_Click"
+                                        ToolTip="Show / Hide API Key" />
+                                <Grid>
+                                    <PasswordBox x:Name="ApiKeyPasswordBox"
+                                                 PasswordChanged="ApiKeyPasswordBox_PasswordChanged" />
+                                    <TextBox x:Name="ApiKeyTextBox"
+                                             Visibility="Collapsed"
+                                             Text="{Binding DeepLApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                </Grid>
+                            </DockPanel>
+                            <TextBlock Text="{Binding ApiKeyStatusText}"
+                                       Style="{StaticResource HintText}"
+                                       Margin="0,0,0,10" />
+
+                            <CheckBox Content="Use DeepL Free API endpoint"
+                                      IsChecked="{Binding UseDeepLFreeApi, Mode=TwoWay}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ▌ AUTO TRANSLATE -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="AUTO TRANSLATE" Style="{StaticResource SectionHeader}" />
+
+                            <!-- Status pill -->
+                            <Border CornerRadius="4"
+                                    Padding="8,4"
+                                    Margin="0,0,0,10"
+                                    HorizontalAlignment="Left">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="#F1F5F9" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsAutoTranslateEnabled}" Value="True">
+                                                <Setter Property="Background" Value="#DCFCE7" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding AutoTranslateStatusText}"
+                                           FontSize="12"
+                                           FontWeight="SemiBold">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsAutoTranslateEnabled}" Value="True">
+                                                    <Setter Property="Foreground" Value="#15803D" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
+
+                            <!-- Start / Stop button (full width) -->
+                            <Button x:Name="AutoTranslateButton"
+                                    Command="{Binding ToggleAutoTranslateCommand}"
+                                    Content="{Binding AutoTranslateButtonLabel}"
+                                    Margin="0,0,0,10"
+                                    MinHeight="36"
+                                    FontSize="13"
+                                    FontWeight="SemiBold"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Center"
+                                    Foreground="White"
+                                    BorderThickness="1"
+                                    Cursor="Hand">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Background"  Value="{StaticResource AccentBrush}" />
+                                        <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                                        <Setter Property="Foreground"  Value="White" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Border x:Name="bd"
+                                                            Background="{TemplateBinding Background}"
+                                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="6"
+                                                            Padding="{TemplateBinding Padding}">
+                                                        <ContentPresenter HorizontalAlignment="Center"
+                                                                          VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="bd" Property="Opacity" Value="0.88" />
+                                                        </Trigger>
+                                                        <Trigger Property="IsPressed" Value="True">
+                                                            <Setter TargetName="bd" Property="Opacity" Value="0.75" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsAutoTranslateEnabled}" Value="True">
+                                                <Setter Property="Background"  Value="{StaticResource DangerBrush}" />
+                                                <Setter Property="BorderBrush" Value="{StaticResource DangerBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+
+                            <TextBlock Text="Capture Interval" Style="{StaticResource FieldLabel}" />
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text="{Binding AutoTranslateIntervalMs, StringFormat={}{0:0} ms}"
+                                           Width="52"
+                                           TextAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           FontSize="12"
+                                           Foreground="{StaticResource TextSecondary}" />
+                                <Slider Minimum="300"
+                                        Maximum="3000"
+                                        TickFrequency="100"
+                                        IsSnapToTickEnabled="True"
+                                        Value="{Binding AutoTranslateIntervalMs, Mode=TwoWay}" />
+                            </DockPanel>
+                            <TextBlock Text="300 ms minimum — 3000 ms maximum"
+                                       Style="{StaticResource HintText}"
+                                       Margin="0,2,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ▌ OVERLAY -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="OVERLAY SETTINGS" Style="{StaticResource SectionHeader}" />
+
+                            <TextBlock Text="Font Size" Style="{StaticResource FieldLabel}" />
+                            <DockPanel Margin="0,0,0,10">
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text="{Binding OverlayFontSize, StringFormat={}{0:0} pt}"
+                                           Width="48"
+                                           TextAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           FontSize="12"
+                                           Foreground="{StaticResource TextSecondary}" />
+                                <Slider Minimum="18"
+                                        Maximum="56"
+                                        TickFrequency="2"
+                                        IsSnapToTickEnabled="True"
+                                        Value="{Binding OverlayFontSize, Mode=TwoWay}" />
+                            </DockPanel>
+
+                            <TextBlock Text="Opacity" Style="{StaticResource FieldLabel}" />
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text="{Binding OverlayOpacity, StringFormat={}{0:P0}}"
+                                           Width="48"
+                                           TextAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           FontSize="12"
+                                           Foreground="{StaticResource TextSecondary}" />
+                                <Slider Minimum="0.35"
+                                        Maximum="1"
+                                        TickFrequency="0.05"
+                                        IsSnapToTickEnabled="True"
+                                        Value="{Binding OverlayOpacity, Mode=TwoWay}" />
+                            </DockPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ▌ PROFILE -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="PROFILE" Style="{StaticResource SectionHeader}" />
+
+                            <TextBlock Text="Profile Name" Style="{StaticResource FieldLabel}" />
                             <TextBox AutomationProperties.AutomationId="ProfileName"
                                      AutomationProperties.Name="Profile Name"
                                      Text="{Binding ProfileName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                      Margin="0,0,0,8" />
-                            <TextBlock Text="Saved" Margin="0,0,0,4" />
-                            <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding SelectedProfile, Mode=TwoWay}" Margin="0,0,0,10" />
+
+                            <TextBlock Text="Saved Profiles" Style="{StaticResource FieldLabel}" />
+                            <ComboBox ItemsSource="{Binding Profiles}"
+                                      SelectedItem="{Binding SelectedProfile, Mode=TwoWay}"
+                                      Margin="0,0,0,10" />
+
                             <StackPanel Orientation="Horizontal">
-                                <Button Content="Save" Command="{Binding SaveProfileCommand}" />
-                                <Button Content="Load" Command="{Binding LoadSelectedProfileCommand}" />
+                                <Button Content="💾  Save"
+                                        Command="{Binding SaveProfileCommand}"
+                                        MinWidth="80" />
+                                <Button Content="📂  Load"
+                                        Command="{Binding LoadSelectedProfileCommand}"
+                                        MinWidth="80" />
                             </StackPanel>
                         </StackPanel>
-                    </GroupBox>
+                    </Border>
 
-                    <GroupBox Header="Debug" Padding="12" Margin="0,0,0,12">
-                        <ItemsControl ItemsSource="{Binding DebugMetrics}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid Margin="0,0,0,6">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="110" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Name}" Foreground="#475569" />
-                                        <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </GroupBox>
+                    <!-- ▌ DEBUG -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="DEBUG INFO" Style="{StaticResource SectionHeader}" />
+                            <ItemsControl ItemsSource="{Binding DebugMetrics}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="0,0,0,5">
+                                            <TextBlock DockPanel.Dock="Left"
+                                                       Text="{Binding Name}"
+                                                       Width="100"
+                                                       FontSize="12"
+                                                       Foreground="{StaticResource LabelBrush}" />
+                                            <TextBlock Text="{Binding Value}"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextPrimary}"
+                                                       TextWrapping="Wrap" />
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
 
-                    <GroupBox Header="Timing Log" Padding="12">
-                        <ListBox ItemsSource="{Binding LastTimings}" MinHeight="100" BorderThickness="0" Background="Transparent" />
-                    </GroupBox>
                 </StackPanel>
             </ScrollViewer>
 
+            <!-- ───────────────────── RIGHT MAIN AREA ───────────────────── -->
             <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="16" />
-                    <RowDefinition Height="*" />
+                    <!-- Original text (smaller) -->
+                    <RowDefinition Height="2*" />
+                    <RowDefinition Height="10" />
+                    <!-- Arabic translation (larger) -->
+                    <RowDefinition Height="3*" />
                 </Grid.RowDefinitions>
 
-                <GroupBox Grid.Row="0" Header="Original Text" Padding="12">
-                    <TextBox AutomationProperties.AutomationId="OriginalTextOutput"
-                             AutomationProperties.Name="Original Text Output"
-                             Text="{Binding OriginalText, Mode=OneWay}"
-                             IsReadOnly="True"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"
-                             FontSize="18"
-                             Background="White" />
-                </GroupBox>
+                <!-- Original Text card -->
+                <Border Grid.Row="0"
+                        Style="{StaticResource Card}"
+                        Margin="0,0,0,0"
+                        Padding="0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border Grid.Row="0"
+                                Background="#F8FAFC"
+                                BorderBrush="{StaticResource BorderBrushSoft}"
+                                BorderThickness="0,0,0,1"
+                                Padding="14,8">
+                            <TextBlock Text="Original Text"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource SectionHeaderBrush}" />
+                        </Border>
+                        <TextBox Grid.Row="1"
+                                 AutomationProperties.AutomationId="OriginalTextOutput"
+                                 AutomationProperties.Name="Original Text Output"
+                                 Text="{Binding OriginalText, Mode=OneWay}"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontSize="18"
+                                 Padding="14,10"
+                                 BorderThickness="0"
+                                 Background="White"
+                                 VerticalContentAlignment="Top" />
+                    </Grid>
+                </Border>
 
-                <GroupBox Grid.Row="2" Header="Arabic Translation" Padding="12">
-                    <TextBox AutomationProperties.AutomationId="TranslatedTextOutput"
-                             AutomationProperties.Name="Translated Text Output"
-                             Text="{Binding TranslatedText, Mode=OneWay}"
-                             IsReadOnly="True"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"
-                             FontSize="22"
-                             FlowDirection="RightToLeft"
-                             TextAlignment="Right"
-                             Background="White" />
-                </GroupBox>
+                <!-- Arabic Translation card -->
+                <Border Grid.Row="2"
+                        Style="{StaticResource Card}"
+                        Margin="0,0,0,10"
+                        Padding="0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Border Grid.Row="0"
+                                Background="#F0FDF4"
+                                BorderBrush="#BBF7D0"
+                                BorderThickness="0,0,0,1"
+                                Padding="14,8">
+                            <DockPanel>
+                                <TextBlock Text="Arabic Translation"
+                                           FontSize="12"
+                                           FontWeight="SemiBold"
+                                           Foreground="#15803D"
+                                           VerticalAlignment="Center" />
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text="RTL ←"
+                                           FontSize="11"
+                                           Foreground="{StaticResource TextMuted}"
+                                           VerticalAlignment="Center" />
+                            </DockPanel>
+                        </Border>
+                        <TextBox Grid.Row="1"
+                                 AutomationProperties.AutomationId="TranslatedTextOutput"
+                                 AutomationProperties.Name="Translated Text Output"
+                                 Text="{Binding TranslatedText, Mode=OneWay}"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontSize="26"
+                                 Padding="14,10"
+                                 BorderThickness="0"
+                                 Background="White"
+                                 FlowDirection="RightToLeft"
+                                 TextAlignment="Right"
+                                 VerticalContentAlignment="Top" />
+                    </Grid>
+                </Border>
             </Grid>
         </Grid>
 
-        <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,1,0,0" Padding="16,8">
+        <!-- ═══════════════════════════════ FOOTER STATUS BAR ═══════════════════════ -->
+        <Border Grid.Row="2"
+                Background="White"
+                BorderBrush="{StaticResource BorderBrushSoft}"
+                BorderThickness="0,1,0,0"
+                Padding="20,8">
             <DockPanel>
+                <TextBlock DockPanel.Dock="Right"
+                           VerticalAlignment="Center"
+                           Margin="0,0,0,0">
+                    <Run Text="F8" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
+                    <Run Text=" Capture Once" Foreground="{StaticResource TextMuted}" FontSize="12" />
+                </TextBlock>
                 <TextBlock AutomationProperties.AutomationId="StatusMessage"
-                           AutomationProperties.Name="{Binding StatusMessage}"
                            Text="{Binding StatusMessage}"
-                           Foreground="#334155"
-                           VerticalAlignment="Center" />
-                <TextBlock DockPanel.Dock="Right" Text="F8" Foreground="#64748B" VerticalAlignment="Center" FontWeight="SemiBold" />
+                           Foreground="{StaticResource TextSecondary}"
+                           FontSize="13"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
             </DockPanel>
         </Border>
     </Grid>

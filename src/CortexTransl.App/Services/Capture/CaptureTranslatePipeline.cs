@@ -226,6 +226,14 @@ public sealed class CaptureTranslatePipeline
         return result;
     }
 
+    public void ResetState()
+    {
+        _lastOcrKey = null;
+        _lastOcrText = null;
+        _lastTranslationKey = null;
+        _lastTranslatedText = null;
+    }
+
     private static string CreateOcrKey(string imageFingerprint, PipelineSettings settings)
     {
         return string.Join('|', imageFingerprint, settings.SourceLanguage, settings.OcrEngine);

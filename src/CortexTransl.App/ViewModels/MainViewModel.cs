@@ -4,8 +4,10 @@ using CortexTransl.App.Services.Capture;
 using CortexTransl.App.Services.Overlay;
 using CortexTransl.App.Services.Profiles;
 using CortexTransl.App.Services.Translation;
+using CortexTransl.App.Services.Settings;
 using CortexTransl.App.Utils;
 using System.Collections.ObjectModel;
+using System.Threading;
 
 namespace CortexTransl.App.ViewModels;
 
@@ -17,7 +19,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly IOverlayService _overlayService;
     private readonly IGameProfileRepository _profileRepository;
     private readonly TranslationProviderSettings _translationProviderSettings;
+    private readonly AppSettingsService _appSettingsService;
     private readonly TimingLogger _timingLogger;
+    private readonly SemaphoreSlim _translationLock = new(1, 1);
 
     private CaptureRegion _selectedRegion = CaptureRegion.Empty;
     private string _sourceLanguage = "en";
@@ -30,9 +34,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _translatedText = string.Empty;
     private string _statusMessage = "Ready. Select a dialogue region to begin.";
     private string _profileName = string.Empty;
-    private string _deepLApiKey;
+    private string _deepLApiKey = string.Empty;
     private bool _useDeepLFreeApi = true;
     private GameProfile? _selectedProfile;
+    private bool _isAutoTranslateEnabled;
+    private double _autoTranslateIntervalMs = 700;
+    private CancellationTokenSource? _autoTranslateCts;
+    private string _autoTranslateStatusText = "Auto Translate: Stopped";
 
     public MainViewModel(
         DatabaseMigrator databaseMigrator,
@@ -41,6 +49,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         IOverlayService overlayService,
         IGameProfileRepository profileRepository,
         TranslationProviderSettings translationProviderSettings,
+        AppSettingsService appSettingsService,
         TimingLogger timingLogger)
     {
         _databaseMigrator = databaseMigrator;
@@ -49,14 +58,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _overlayService = overlayService;
         _profileRepository = profileRepository;
         _translationProviderSettings = translationProviderSettings;
+        _appSettingsService = appSettingsService;
         _timingLogger = timingLogger;
-        _deepLApiKey = translationProviderSettings.DeepLApiKey;
-        _useDeepLFreeApi = translationProviderSettings.UseDeepLFreeApi;
 
         SelectRegionCommand = new AsyncRelayCommand(_ => SelectRegionAsync());
         CaptureAndTranslateCommand = new AsyncRelayCommand(_ => CaptureAndTranslateAsync());
         SaveProfileCommand = new AsyncRelayCommand(_ => SaveProfileAsync(), _ => !SelectedRegion.IsEmpty);
         LoadSelectedProfileCommand = new RelayCommand(_ => LoadSelectedProfile(), _ => SelectedProfile is not null);
+        ToggleAutoTranslateCommand = new RelayCommand(_ => ToggleAutoTranslate());
         ResetDebugMetrics();
     }
 
@@ -102,6 +111,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public RelayCommand LoadSelectedProfileCommand { get; }
 
+    public RelayCommand ToggleAutoTranslateCommand { get; }
+
     public CaptureRegion SelectedRegion
     {
         get => _selectedRegion;
@@ -120,19 +131,37 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string SourceLanguage
     {
         get => _sourceLanguage;
-        set => SetProperty(ref _sourceLanguage, value);
+        set
+        {
+            if (SetProperty(ref _sourceLanguage, value))
+            {
+                _pipeline.ResetState();
+            }
+        }
     }
 
     public string TargetLanguage
     {
         get => _targetLanguage;
-        set => SetProperty(ref _targetLanguage, value);
+        set
+        {
+            if (SetProperty(ref _targetLanguage, value))
+            {
+                _pipeline.ResetState();
+            }
+        }
     }
 
     public string OcrEngine
     {
         get => _ocrEngine;
-        set => SetProperty(ref _ocrEngine, value);
+        set
+        {
+            if (SetProperty(ref _ocrEngine, value))
+            {
+                _pipeline.ResetState();
+            }
+        }
     }
 
     public string TranslationProvider
@@ -142,7 +171,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _translationProvider, value))
             {
+                _pipeline.ResetState();
                 ResetDebugMetrics();
+                OnPropertyChanged(nameof(ProviderHint));
+                _ = SaveSettingsAsync();
             }
         }
     }
@@ -156,6 +188,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             {
                 _translationProviderSettings.DeepLApiKey = value;
                 ResetDebugMetrics();
+                OnPropertyChanged(nameof(ProviderHint));
+                OnPropertyChanged(nameof(ApiKeyStatusText));
+                _ = SaveSettingsAsync();
             }
         }
     }
@@ -169,6 +204,56 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             {
                 _translationProviderSettings.UseDeepLFreeApi = value;
                 ResetDebugMetrics();
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public bool IsAutoTranslateEnabled
+    {
+        get => _isAutoTranslateEnabled;
+        private set
+        {
+            if (SetProperty(ref _isAutoTranslateEnabled, value))
+            {
+                _ = SaveSettingsAsync();
+                OnPropertyChanged(nameof(AutoTranslateButtonLabel));
+                UpdateAutoTranslateStatus();
+            }
+        }
+    }
+
+    public string AutoTranslateButtonLabel => IsAutoTranslateEnabled ? "⏹ Stop Auto Translate" : "▶ Start Auto Translate";
+
+    public string AutoTranslateStatusText
+    {
+        get => _autoTranslateStatusText;
+        private set => SetProperty(ref _autoTranslateStatusText, value);
+    }
+
+    /// <summary>Hint shown below the provider combobox. Shows API key status for DeepL.</summary>
+    public string ProviderHint
+    {
+        get
+        {
+            if (TranslationProvider.Equals("placeholder", StringComparison.OrdinalIgnoreCase))
+                return "Testing mode only. No real translation.";
+            if (TranslationProvider.Equals("deepl", StringComparison.OrdinalIgnoreCase))
+                return string.IsNullOrWhiteSpace(DeepLApiKey) ? "API key missing" : "API key ready ✓";
+            return string.Empty;
+        }
+    }
+
+    public string ApiKeyStatusText => string.IsNullOrWhiteSpace(DeepLApiKey) ? "No key entered" : "Key saved (encrypted)";
+
+    public double AutoTranslateIntervalMs
+    {
+        get => _autoTranslateIntervalMs;
+        set
+        {
+            if (SetProperty(ref _autoTranslateIntervalMs, value))
+            {
+                _ = SaveSettingsAsync();
             }
         }
     }
@@ -225,6 +310,122 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         await _databaseMigrator.InitializeAsync(cancellationToken);
         await RefreshProfilesAsync(cancellationToken);
+
+        var appSettings = await _appSettingsService.LoadAsync(cancellationToken);
+        _translationProvider = appSettings.Provider;
+        _useDeepLFreeApi = appSettings.UseDeepLFreeApi;
+        _isAutoTranslateEnabled = appSettings.AutoTranslateEnabled;
+        _autoTranslateIntervalMs = appSettings.AutoTranslateIntervalMs;
+        
+        var decryptedKey = _appSettingsService.DecryptApiKey(appSettings.EncryptedDeepLApiKey);
+        _deepLApiKey = decryptedKey;
+        _translationProviderSettings.DeepLApiKey = decryptedKey;
+        _translationProviderSettings.UseDeepLFreeApi = _useDeepLFreeApi;
+
+        OnPropertyChanged(nameof(TranslationProvider));
+        OnPropertyChanged(nameof(UseDeepLFreeApi));
+        OnPropertyChanged(nameof(DeepLApiKey));
+        OnPropertyChanged(nameof(IsAutoTranslateEnabled));
+        OnPropertyChanged(nameof(AutoTranslateIntervalMs));
+        OnPropertyChanged(nameof(ProviderHint));
+        OnPropertyChanged(nameof(ApiKeyStatusText));
+        OnPropertyChanged(nameof(AutoTranslateButtonLabel));
+
+        ResetDebugMetrics();
+        UpdateAutoTranslateStatus();
+
+        if (_isAutoTranslateEnabled)
+        {
+            StartAutoTranslate();
+        }
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        var settings = new AppSettings
+        {
+            Provider = _translationProvider,
+            EncryptedDeepLApiKey = _appSettingsService.EncryptApiKey(_deepLApiKey),
+            UseDeepLFreeApi = _useDeepLFreeApi,
+            AutoTranslateEnabled = _isAutoTranslateEnabled,
+            AutoTranslateIntervalMs = _autoTranslateIntervalMs
+        };
+        await _appSettingsService.SaveAsync(settings);
+    }
+
+    private void ToggleAutoTranslate()
+    {
+        if (IsAutoTranslateEnabled)
+        {
+            IsAutoTranslateEnabled = false;
+            StopAutoTranslate();
+        }
+        else
+        {
+            // Validate before starting
+            if (SelectedRegion.IsEmpty)
+            {
+                StatusMessage = "Select a dialogue region before starting Auto Translate.";
+                return;
+            }
+            if (TranslationProvider.Equals("deepl", StringComparison.OrdinalIgnoreCase) &&
+                string.IsNullOrWhiteSpace(DeepLApiKey))
+            {
+                StatusMessage = "DeepL API key is required before starting Auto Translate.";
+                return;
+            }
+            IsAutoTranslateEnabled = true;
+            StartAutoTranslate();
+        }
+    }
+
+    private void StartAutoTranslate()
+    {
+        StopAutoTranslate();
+        _autoTranslateCts = new CancellationTokenSource();
+        _ = AutoTranslateLoopAsync(_autoTranslateCts.Token);
+    }
+
+    private void StopAutoTranslate()
+    {
+        _autoTranslateCts?.Cancel();
+        _autoTranslateCts?.Dispose();
+        _autoTranslateCts = null;
+    }
+
+    private async Task AutoTranslateLoopAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                var interval = TimeSpan.FromMilliseconds(Math.Clamp(AutoTranslateIntervalMs, 300, 3000));
+                using var periodicTimer = new PeriodicTimer(interval);
+
+                await periodicTimer.WaitForNextTickAsync(token);
+                if (token.IsCancellationRequested) break;
+
+                if (!SelectedRegion.IsEmpty)
+                {
+                    await CaptureAndTranslateInternalAsync(token);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Auto translate error: {ex.Message}");
+            IsAutoTranslateEnabled = false;
+        }
+    }
+
+    private void UpdateAutoTranslateStatus()
+    {
+        var statusText = IsAutoTranslateEnabled ? "Auto Translate: Running ●" : "Auto Translate: Stopped";
+        AutoTranslateStatusText = statusText;
+        SetStatus(IsAutoTranslateEnabled ? "Auto Translate: Running" : "Auto Translate: Stopped");
     }
 
     public void SetStatus(string message)
@@ -234,16 +435,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public async Task CaptureAndTranslateAsync(CancellationToken cancellationToken = default)
     {
-        if (SelectedRegion.IsEmpty)
+        await CaptureAndTranslateInternalAsync(cancellationToken);
+    }
+
+    private async Task CaptureAndTranslateInternalAsync(CancellationToken cancellationToken)
+    {
+        if (!await _translationLock.WaitAsync(0, cancellationToken))
         {
-            StatusMessage = "Select a dialogue region before capturing.";
-            ResetDebugMetrics();
-            return;
+            return; // Skip if already translating
         }
 
         try
         {
-            StatusMessage = "Capturing selected region...";
+            if (SelectedRegion.IsEmpty)
+            {
+                StatusMessage = "Select a dialogue region before capturing.";
+                ResetDebugMetrics();
+                return;
+            }
+
+            StatusMessage = "Capturing...";
             _translationProviderSettings.DeepLApiKey = DeepLApiKey;
             _translationProviderSettings.UseDeepLFreeApi = UseDeepLFreeApi;
 
@@ -279,11 +490,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
             UpdateDebugMetrics(result, overlayElapsed);
             StatusMessage = result.Status;
+
+            // Refresh the auto translate status pill after each run
+            if (IsAutoTranslateEnabled)
+                AutoTranslateStatusText = "Auto Translate: Running ●";
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
             ResetDebugMetrics();
+        }
+        finally
+        {
+            _translationLock.Release();
         }
     }
 
@@ -300,6 +519,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
             SelectedRegion = region;
             StatusMessage = "Region selected.";
+            _pipeline.ResetState();
         }
         catch (Exception ex)
         {
@@ -351,6 +571,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         TranslationProvider = SelectedProfile.TranslationProvider;
         ProfileName = SelectedProfile.Name;
         StatusMessage = $"Loaded profile '{SelectedProfile.Name}'.";
+        _pipeline.ResetState();
     }
 
     private async Task RefreshProfilesAsync(CancellationToken cancellationToken = default)
@@ -412,18 +633,30 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private string CurrentProviderStatus()
     {
-        if (TranslationProvider.Equals("deepl", StringComparison.OrdinalIgnoreCase))
+        var isPlaceholder = TranslationProvider.Equals("placeholder", StringComparison.OrdinalIgnoreCase);
+        
+        if (isPlaceholder && !string.IsNullOrWhiteSpace(DeepLApiKey))
+        {
+            return "Placeholder (Warning: API key entered, but Provider is Placeholder. Select DeepL to use real translation.)";
+        }
+        else if (isPlaceholder)
+        {
+            return "Placeholder ready";
+        }
+        else if (TranslationProvider.Equals("deepl", StringComparison.OrdinalIgnoreCase))
         {
             return string.IsNullOrWhiteSpace(DeepLApiKey)
                 ? "DeepL missing API key"
                 : "DeepL ready";
         }
 
-        return "Placeholder ready";
+        return "Unknown provider";
     }
 
     public void Dispose()
     {
+        StopAutoTranslate();
         _overlayService.Dispose();
+        _translationLock.Dispose();
     }
 }
