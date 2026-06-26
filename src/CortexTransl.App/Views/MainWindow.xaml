@@ -220,6 +220,10 @@
                                         IsSnapToTickEnabled="True"
                                         Value="{Binding AutoTranslateIntervalMs, Mode=TwoWay}" />
                             </DockPanel>
+
+                            <CheckBox Content="Hide overlay when Auto Translate stops"
+                                      IsChecked="{Binding HideOverlayWhenAutoTranslateStops, Mode=TwoWay}"
+                                      Margin="0,10,0,0" />
                         </StackPanel>
                     </Border>
 
@@ -228,7 +232,7 @@
                         <StackPanel>
                             <TextBlock Text="OVERLAY" Style="{StaticResource SectionTitle}" />
                             
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,12">
                                 <Button Content="Show Overlay"
                                         Command="{Binding ShowOverlayCommand}"
                                         Style="{StaticResource SecondaryButton}"
@@ -236,8 +240,14 @@
                                 <Button Content="Hide Overlay"
                                         Command="{Binding HideOverlayCommand}"
                                         Style="{StaticResource SecondaryButton}"
-                                        MinWidth="100" />
-                            </StackPanel>
+                                        MinWidth="100"
+                                        ToolTip="Hide the translation overlay" />
+                                <Button Content="Clear Translation"
+                                        Command="{Binding ClearTranslationCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        MinWidth="130"
+                                        ToolTip="Clear current text and reset translation state" />
+                            </WrapPanel>
 
                             <CheckBox Content="Recording Compatibility Mode"
                                       IsChecked="{Binding RecordingCompatibilityMode, Mode=TwoWay}"

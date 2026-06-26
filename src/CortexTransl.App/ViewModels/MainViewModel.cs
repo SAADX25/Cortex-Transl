@@ -46,9 +46,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private GameProfile? _selectedProfile;
     private bool _isAutoTranslateEnabled;
     private double _autoTranslateIntervalMs = 700;
+    private bool _hideOverlayWhenAutoTranslateStops = true;
     private CancellationTokenSource? _autoTranslateCts;
-    private string _autoTranslateStatusText = "Auto Translate: Stopped";
+    private string _autoTranslateStatusText = "Auto Translate stopped.";
     private bool _isFocusMode = false;
+    private bool _overlayHiddenByUser;
+    private string? _hiddenOverlayText;
 
     public MainViewModel(
         DatabaseMigrator databaseMigrator,
@@ -79,6 +82,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         ToggleFocusModeCommand = new RelayCommand(_ => ToggleFocusMode());
         ShowOverlayCommand = new AsyncRelayCommand(_ => ShowOverlayAsync());
         HideOverlayCommand = new RelayCommand(_ => HideOverlay());
+        ClearTranslationCommand = new RelayCommand(_ => ClearTranslation());
         ResetDebugMetrics();
     }
 
@@ -151,6 +155,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public AsyncRelayCommand ShowOverlayCommand { get; }
 
     public RelayCommand HideOverlayCommand { get; }
+
+    public RelayCommand ClearTranslationCommand { get; }
 
     public bool IsFocusMode
     {
@@ -277,7 +283,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             {
                 _ = SaveSettingsAsync();
                 OnPropertyChanged(nameof(AutoTranslateButtonLabel));
-                UpdateAutoTranslateStatus();
             }
         }
     }
@@ -311,6 +316,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         set
         {
             if (SetProperty(ref _autoTranslateIntervalMs, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public bool HideOverlayWhenAutoTranslateStops
+    {
+        get => _hideOverlayWhenAutoTranslateStops;
+        set
+        {
+            if (SetProperty(ref _hideOverlayWhenAutoTranslateStops, value))
             {
                 _ = SaveSettingsAsync();
             }
@@ -463,6 +480,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _useDeepLFreeApi = appSettings.UseDeepLFreeApi;
         _isAutoTranslateEnabled = appSettings.AutoTranslateEnabled;
         _autoTranslateIntervalMs = appSettings.AutoTranslateIntervalMs;
+        _hideOverlayWhenAutoTranslateStops = appSettings.HideOverlayWhenAutoTranslateStops;
         _overlayFontSize = appSettings.OverlayFontSize;
         _overlayOpacity = appSettings.OverlayOpacity;
         _overlayBackgroundOpacity = appSettings.OverlayBackgroundOpacity;
@@ -482,6 +500,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DeepLApiKey));
         OnPropertyChanged(nameof(IsAutoTranslateEnabled));
         OnPropertyChanged(nameof(AutoTranslateIntervalMs));
+        OnPropertyChanged(nameof(HideOverlayWhenAutoTranslateStops));
         OnPropertyChanged(nameof(OverlayFontSize));
         OnPropertyChanged(nameof(OverlayOpacity));
         OnPropertyChanged(nameof(OverlayBackgroundOpacity));
@@ -513,6 +532,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             Theme = _selectedTheme,
             AutoTranslateEnabled = _isAutoTranslateEnabled,
             AutoTranslateIntervalMs = _autoTranslateIntervalMs,
+            HideOverlayWhenAutoTranslateStops = _hideOverlayWhenAutoTranslateStops,
             OverlayFontSize = _overlayFontSize,
             OverlayOpacity = _overlayOpacity,
             OverlayBackgroundOpacity = _overlayBackgroundOpacity,
@@ -529,7 +549,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         if (IsAutoTranslateEnabled)
         {
             IsAutoTranslateEnabled = false;
-            StopAutoTranslate();
+            StopAutoTranslate(
+                hideOverlay: HideOverlayWhenAutoTranslateStops,
+                updateStatus: true);
         }
         else
         {
@@ -562,13 +584,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             : TranslatedText;
 
         await _overlayService.ShowTextAsync(textToShow, SelectedRegion, CreateOverlaySettings());
-        StatusMessage = "Overlay preview shown.";
+        _overlayHiddenByUser = false;
+        _hiddenOverlayText = null;
+        StatusMessage = "Overlay shown.";
     }
 
     private void HideOverlay()
     {
         _overlayService.Hide();
+        _overlayHiddenByUser = true;
+        _hiddenOverlayText = TranslatedText;
         StatusMessage = "Overlay hidden.";
+    }
+
+    private void ClearTranslation()
+    {
+        OriginalText = string.Empty;
+        TranslatedText = string.Empty;
+        _overlayService.ClearText();
+        _pipeline.ResetState();
+        _overlayHiddenByUser = false;
+        _hiddenOverlayText = null;
+        ResetDebugMetrics();
+        StatusMessage = "Translation cleared.";
     }
 
     private OverlaySettings CreateOverlaySettings()
@@ -585,16 +623,32 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void StartAutoTranslate()
     {
-        StopAutoTranslate();
+        StopAutoTranslate(hideOverlay: false, updateStatus: false);
+        _overlayHiddenByUser = false;
+        _hiddenOverlayText = null;
         _autoTranslateCts = new CancellationTokenSource();
+        SetAutoTranslateStatus("Auto Translate running.");
         _ = AutoTranslateLoopAsync(_autoTranslateCts.Token);
     }
 
-    private void StopAutoTranslate()
+    private void StopAutoTranslate(bool hideOverlay = false, bool updateStatus = false)
     {
         _autoTranslateCts?.Cancel();
         _autoTranslateCts?.Dispose();
         _autoTranslateCts = null;
+
+        if (hideOverlay)
+        {
+            _overlayService.Hide();
+        }
+
+        if (updateStatus)
+        {
+            SetAutoTranslateStatus(
+                hideOverlay
+                    ? "Auto Translate stopped. Overlay hidden."
+                    : "Auto Translate stopped.");
+        }
     }
 
     private async Task AutoTranslateLoopAsync(CancellationToken token)
@@ -611,7 +665,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
                 if (!SelectedRegion.IsEmpty)
                 {
-                    await CaptureAndTranslateInternalAsync(token);
+                    await CaptureAndTranslateInternalAsync(token, isAutoCapture: true);
                 }
             }
         }
@@ -622,14 +676,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             SetStatus($"Auto translate error: {ex.Message}");
             IsAutoTranslateEnabled = false;
+            StopAutoTranslate(hideOverlay: HideOverlayWhenAutoTranslateStops, updateStatus: false);
         }
     }
 
     private void UpdateAutoTranslateStatus()
     {
-        var statusText = IsAutoTranslateEnabled ? "Auto Translate: Running" : "Auto Translate: Stopped";
-        AutoTranslateStatusText = statusText;
-        SetStatus(IsAutoTranslateEnabled ? "Auto Translate: Running" : "Auto Translate: Stopped");
+        SetAutoTranslateStatus(IsAutoTranslateEnabled ? "Auto Translate running." : "Auto Translate stopped.");
+    }
+
+    private void SetAutoTranslateStatus(string message)
+    {
+        AutoTranslateStatusText = message;
+        SetStatus(message);
     }
 
     public void SetStatus(string message)
@@ -639,14 +698,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public async Task CaptureAndTranslateAsync(CancellationToken cancellationToken = default)
     {
-        await CaptureAndTranslateInternalAsync(cancellationToken);
+        await CaptureAndTranslateInternalAsync(cancellationToken, isAutoCapture: false);
     }
 
-    private async Task CaptureAndTranslateInternalAsync(CancellationToken cancellationToken)
+    private async Task CaptureAndTranslateInternalAsync(CancellationToken cancellationToken, bool isAutoCapture)
     {
         if (!await _translationLock.WaitAsync(0, cancellationToken))
         {
-            return; // Skip if already translating
+            return;
         }
 
         try
@@ -663,6 +722,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             _translationProviderSettings.UseDeepLFreeApi = UseDeepLFreeApi;
 
             var settings = new PipelineSettings(SourceLanguage, TargetLanguage, OcrEngine, TranslationProvider);
+            if (TranslationProvider.Equals("deepl", StringComparison.OrdinalIgnoreCase))
+            {
+                StatusMessage = "Translating with DeepL...";
+            }
+
             var result = await _pipeline.RunAsync(SelectedRegion, settings, cancellationToken);
 
             OriginalText = result.OriginalText;
@@ -675,23 +739,28 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
 
             long? overlayElapsed = null;
-            if (!string.IsNullOrWhiteSpace(result.TranslatedText))
+            if (ShouldShowOverlay(result, isAutoCapture, cancellationToken))
             {
                 overlayElapsed = await _overlayService.ShowTextAsync(
                     result.TranslatedText,
                     SelectedRegion,
-                    CreateOverlaySettings());
+                    CreateOverlaySettings(),
+                    cancellationToken);
+                _overlayHiddenByUser = false;
+                _hiddenOverlayText = null;
 
                 var overlayTiming = new TimingEntry("overlay update", overlayElapsed.Value);
                 LastTimings.Add(overlayTiming);
                 await _timingLogger.LogAsync("overlay-update", [overlayTiming], cancellationToken);
             }
             UpdateDebugMetrics(result, overlayElapsed);
-            StatusMessage = result.Status;
+            StatusMessage = GetUserStatusMessage(result);
 
-            // Refresh the auto translate status pill after each run
             if (IsAutoTranslateEnabled)
-                AutoTranslateStatusText = "Auto Translate: Running";
+                AutoTranslateStatusText = "Auto Translate running.";
+        }
+        catch (OperationCanceledException) when (isAutoCapture && !IsAutoTranslateEnabled)
+        {
         }
         catch (Exception ex)
         {
@@ -702,6 +771,52 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             _translationLock.Release();
         }
+    }
+
+    private bool ShouldShowOverlay(PipelineResult result, bool isAutoCapture, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(result.TranslatedText) || cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        if (isAutoCapture && !IsAutoTranslateEnabled)
+        {
+            return false;
+        }
+
+        if (isAutoCapture &&
+            _overlayHiddenByUser &&
+            IsDuplicateSkip(result) &&
+            string.Equals(result.TranslatedText, _hiddenOverlayText, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string GetUserStatusMessage(PipelineResult result)
+    {
+        if (IsDuplicateSkip(result))
+        {
+            return "Waiting for text change.";
+        }
+
+        if (result.CacheStatus.Equals("hit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Cache hit: loaded instantly.";
+        }
+
+        return string.IsNullOrWhiteSpace(result.TranslatedText)
+            ? result.Status
+            : "Translation completed.";
+    }
+
+    private static bool IsDuplicateSkip(PipelineResult result)
+    {
+        return result.CacheStatus.Equals("skipped", StringComparison.OrdinalIgnoreCase) ||
+            result.Timings.Any(t => t.Name.Equals("translation skipped", StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task SelectRegionAsync()

@@ -23,6 +23,16 @@
     <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="ButtonHoverBackgroundBrush" Color="#F8FAFC" />
     <SolidColorBrush x:Key="ButtonPressedBackgroundBrush" Color="#E2E8F0" />
+    <SolidColorBrush x:Key="ControlHoverBackgroundBrush" Color="#F8FAFC" />
+    <SolidColorBrush x:Key="ComboBoxPopupBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ComboBoxPopupBorderBrush" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="ScrollBarTrackBrush" Color="#E2E8F0" />
+    <SolidColorBrush x:Key="ScrollBarThumbBrush" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="ScrollBarThumbHoverBrush" Color="#94A3B8" />
+    <SolidColorBrush x:Key="ScrollBarThumbPressedBrush" Color="#64748B" />
+    <SolidColorBrush x:Key="SliderTrackBrush" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="SliderFillBrush" Color="#2563EB" />
+    <SolidColorBrush x:Key="SliderThumbBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="DebugMetricBackgroundBrush" Color="#F1F5F9" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#16A34A" />
     <SolidColorBrush x:Key="SectionHeaderBrush" Color="#1E3A5F" />

@@ -4,7 +4,13 @@ namespace CortexTransl.App.Services.Overlay;
 
 public interface IOverlayService : IDisposable
 {
-    Task<long> ShowTextAsync(string text, CaptureRegion region, OverlaySettings settings);
+    Task<long> ShowTextAsync(
+        string text,
+        CaptureRegion region,
+        OverlaySettings settings,
+        CancellationToken cancellationToken = default);
 
     void Hide();
+
+    void ClearText();
 }

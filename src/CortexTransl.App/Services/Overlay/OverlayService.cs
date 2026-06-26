@@ -15,7 +15,11 @@ public sealed class OverlayService : IOverlayService
     private DateTimeOffset _lastVisualUpdateUtc = DateTimeOffset.MinValue;
     private bool? _currentRecordingSafeMode;
 
-    public async Task<long> ShowTextAsync(string text, CaptureRegion region, OverlaySettings settings)
+    public async Task<long> ShowTextAsync(
+        string text,
+        CaptureRegion region,
+        OverlaySettings settings,
+        CancellationToken cancellationToken = default)
     {
         var request = new OverlayRequest(
             text.Trim(),
@@ -27,7 +31,7 @@ public sealed class OverlayService : IOverlayService
             return 0;
         }
 
-        await _updateGate.WaitAsync();
+        await _updateGate.WaitAsync(cancellationToken);
         try
         {
             if (_lastAppliedRequest == request && _overlayWindow?.IsVisible == true)
@@ -38,8 +42,10 @@ public sealed class OverlayService : IOverlayService
             var elapsedSinceLastUpdate = DateTimeOffset.UtcNow - _lastVisualUpdateUtc;
             if (_lastAppliedRequest is not null && elapsedSinceLastUpdate < MinimumVisualUpdateInterval)
             {
-                await Task.Delay(MinimumVisualUpdateInterval - elapsedSinceLastUpdate);
+                await Task.Delay(MinimumVisualUpdateInterval - elapsedSinceLastUpdate, cancellationToken);
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             var stopwatch = Stopwatch.StartNew();
             EnsureWindow(request.Settings);
@@ -65,6 +71,12 @@ public sealed class OverlayService : IOverlayService
     public void Hide()
     {
         _overlayWindow?.Hide();
+    }
+
+    public void ClearText()
+    {
+        _overlayWindow?.ClearText();
+        _lastAppliedRequest = null;
     }
 
     public void Dispose()

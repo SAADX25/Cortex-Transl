@@ -16,6 +16,8 @@ public sealed class AppSettings
 
     public double AutoTranslateIntervalMs { get; set; } = 700;
 
+    public bool HideOverlayWhenAutoTranslateStops { get; set; } = true;
+
     public double OverlayFontSize { get; set; } = 32;
 
     public double OverlayOpacity { get; set; } = 1;

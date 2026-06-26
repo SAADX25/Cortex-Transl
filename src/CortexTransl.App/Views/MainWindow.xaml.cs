@@ -74,7 +74,7 @@ public partial class MainWindow : Window
             if (f8Registered && f9Registered && f10Registered)
             {
                 _hotkeyService.HotkeyPressed += OnHotkeyPressed;
-                _viewModel.SetStatus("Ready. Select a dialogue region to begin. Hotkeys enabled.");
+                _viewModel.SetStatus("Ready. Select a dialogue region to begin.");
             }
             else
             {

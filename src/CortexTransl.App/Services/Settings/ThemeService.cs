@@ -1,5 +1,7 @@
 using Microsoft.Win32;
+using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 
 namespace CortexTransl.App.Services.Settings;
 
@@ -10,17 +12,20 @@ public sealed class ThemeService
     private const string SystemTheme = "System";
     private const string LightThemePath = "Views/Styles/Theme.Light.xaml";
     private const string DarkThemePath = "Views/Styles/Theme.Dark.xaml";
+    private const int DwmwaUseImmersiveDarkMode = 20;
+    private const int DwmwaUseImmersiveDarkModeBefore20H1 = 19;
 
     public string CurrentTheme { get; private set; } = LightTheme;
+    public string EffectiveTheme { get; private set; } = LightTheme;
 
     public void ApplyTheme(string theme)
     {
         CurrentTheme = NormalizeTheme(theme);
-        var effectiveTheme = CurrentTheme.Equals(SystemTheme, StringComparison.OrdinalIgnoreCase)
+        EffectiveTheme = CurrentTheme.Equals(SystemTheme, StringComparison.OrdinalIgnoreCase)
             ? ResolveSystemTheme()
             : CurrentTheme;
 
-        var sourcePath = effectiveTheme.Equals(DarkTheme, StringComparison.OrdinalIgnoreCase)
+        var sourcePath = EffectiveTheme.Equals(DarkTheme, StringComparison.OrdinalIgnoreCase)
             ? DarkThemePath
             : LightThemePath;
 
@@ -40,6 +45,8 @@ public sealed class ThemeService
             var index = resources.IndexOf(existingTheme);
             resources[index] = nextTheme;
         }
+
+        ApplyNativeTitleBars(EffectiveTheme);
     }
 
     public static string NormalizeTheme(string? theme)
@@ -80,4 +87,51 @@ public sealed class ThemeService
             return LightTheme;
         }
     }
+
+    private static void ApplyNativeTitleBars(string effectiveTheme)
+    {
+        if (Application.Current is null)
+        {
+            return;
+        }
+
+        var useDarkTitleBar = effectiveTheme.Equals(DarkTheme, StringComparison.OrdinalIgnoreCase);
+
+        foreach (Window window in Application.Current.Windows)
+        {
+            ApplyNativeTitleBar(window, useDarkTitleBar);
+        }
+    }
+
+    private static void ApplyNativeTitleBar(Window window, bool useDarkTitleBar)
+    {
+        try
+        {
+            var handle = new WindowInteropHelper(window).Handle;
+            if (handle == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var value = useDarkTitleBar ? 1 : 0;
+            var size = Marshal.SizeOf<int>();
+            var result = DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkMode, ref value, size);
+            if (result != 0)
+            {
+                value = useDarkTitleBar ? 1 : 0;
+                DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkModeBefore20H1, ref value, size);
+            }
+        }
+        catch
+        {
+            // Native title-bar theming is best effort and must never block the app.
+        }
+    }
+
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(
+        IntPtr hwnd,
+        int dwAttribute,
+        ref int pvAttribute,
+        int cbAttribute);
 }

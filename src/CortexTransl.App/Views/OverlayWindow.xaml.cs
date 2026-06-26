@@ -51,6 +51,11 @@ public partial class OverlayWindow : Window
         Top = adjustedLocation.Y;
     }
 
+    public void ClearText()
+    {
+        ApplyContent(string.Empty);
+    }
+
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         ApplyExtendedStyles();
