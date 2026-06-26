@@ -118,6 +118,10 @@ dotnet restore
 dotnet build
 ```
 
+## Developer Quick Start
+
+Double-click `Cortex_Dev.bat` from the repository root to restore, build Debug, and run `CortexTransl.App`.
+
 The runtime database is stored under `%LOCALAPPDATA%\Cortex Transl\cortex-transl.db`.
 
 For DeepL testing, set `CORTEX_TRANSL_DEEPL_API_KEY` before launch or paste the key into the app. Keep the Placeholder provider selected for offline testing.
