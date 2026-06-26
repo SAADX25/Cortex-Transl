@@ -1,4 +1,4 @@
-﻿using CortexTransl.App.Data;
+using CortexTransl.App.Data;
 using CortexTransl.App.Models;
 using CortexTransl.App.Services.Capture;
 using CortexTransl.App.Services.Overlay;
@@ -34,7 +34,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private double _overlayOpacity = 1;
     private double _overlayBackgroundOpacity = 0.86;
     private double _overlayMaxWidth = 920;
-    private string _overlayPositionPreset = "custom";
+    private string _overlayPositionMode = "locked";
+    private string _overlayPositionPreset = "bottom-center";
+    private double? _overlayCustomLeft;
+    private double? _overlayCustomTop;
+    private bool _overlayPositionUnlocked;
     private string _overlayRenderMode = "transparent";
     private bool _overlayClickThrough = true;
     private string _originalText = string.Empty;
@@ -46,12 +50,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private GameProfile? _selectedProfile;
     private bool _isAutoTranslateEnabled;
     private double _autoTranslateIntervalMs = 700;
-    private bool _hideOverlayWhenAutoTranslateStops = true;
     private CancellationTokenSource? _autoTranslateCts;
     private string _autoTranslateStatusText = "Auto Translate stopped.";
     private bool _isFocusMode = false;
     private bool _overlayHiddenByUser;
     private string? _hiddenOverlayText;
+    private string _appMode = "Simple";
+    private string _usageType = "Game";
+    private string _translationQuality = "Balanced";
 
     public MainViewModel(
         DatabaseMigrator databaseMigrator,
@@ -83,6 +89,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         ShowOverlayCommand = new AsyncRelayCommand(_ => ShowOverlayAsync());
         HideOverlayCommand = new RelayCommand(_ => HideOverlay());
         ClearTranslationCommand = new RelayCommand(_ => ClearTranslation());
+        ToggleOverlayPositionLockCommand = new RelayCommand(_ => ToggleOverlayPositionLock());
+        _overlayService.OverlayPositionChanged += OnOverlayPositionChanged;
         ResetDebugMetrics();
     }
 
@@ -114,6 +122,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         new("deepl", "DeepL")
     ];
 
+    public IReadOnlyList<OptionItem> TranslationQualityOptions { get; } =
+    [
+        new("Fast", "Fast"),
+        new("Balanced", "Balanced"),
+        new("Story", "Story (Coming later)")
+    ];
+
     public IReadOnlyList<OptionItem> ThemeOptions { get; } =
     [
         new("Light", "Light"),
@@ -127,11 +142,20 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         new("recording-safe", "Recording Safe")
     ];
 
+    public IReadOnlyList<OptionItem> OverlayPositionModeOptions { get; } =
+    [
+        new("locked", "Locked Subtitle Position"),
+        new("smart", "Smart Avoid OCR Region")
+    ];
+
     public IReadOnlyList<OptionItem> OverlayPositionOptions { get; } =
     [
-        new("custom", "Custom"),
+        new("top-center", "Top Center"),
+        new("middle-center", "Middle Center"),
         new("bottom-center", "Bottom Center"),
-        new("top-center", "Top Center")
+        new("above-ocr", "Above OCR Region"),
+        new("below-ocr", "Below OCR Region"),
+        new("custom", "Custom")
     ];
 
     public ObservableCollection<GameProfile> Profiles { get; } = [];
@@ -158,10 +182,53 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public RelayCommand ClearTranslationCommand { get; }
 
+    public RelayCommand ToggleOverlayPositionLockCommand { get; }
+
     public bool IsFocusMode
     {
         get => _isFocusMode;
         set => SetProperty(ref _isFocusMode, value);
+    }
+
+    public string AppMode
+    {
+        get => _appMode;
+        set
+        {
+            if (SetProperty(ref _appMode, value))
+            {
+                OnPropertyChanged(nameof(IsSimpleMode));
+                OnPropertyChanged(nameof(IsAdvancedMode));
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public bool IsSimpleMode => AppMode.Equals("Simple", StringComparison.OrdinalIgnoreCase);
+    public bool IsAdvancedMode => AppMode.Equals("Advanced", StringComparison.OrdinalIgnoreCase);
+
+    public string UsageType
+    {
+        get => _usageType;
+        set
+        {
+            if (SetProperty(ref _usageType, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public string TranslationQuality
+    {
+        get => _translationQuality;
+        set
+        {
+            if (SetProperty(ref _translationQuality, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
     }
 
     public CaptureRegion SelectedRegion
@@ -322,18 +389,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public bool HideOverlayWhenAutoTranslateStops
-    {
-        get => _hideOverlayWhenAutoTranslateStops;
-        set
-        {
-            if (SetProperty(ref _hideOverlayWhenAutoTranslateStops, value))
-            {
-                _ = SaveSettingsAsync();
-            }
-        }
-    }
-
     public double OverlayFontSize
     {
         get => _overlayFontSize;
@@ -342,6 +397,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _overlayFontSize, value))
             {
                 _ = SaveSettingsAsync();
+                _ = RefreshVisibleOverlayAsync();
             }
         }
     }
@@ -354,6 +410,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _overlayOpacity, value))
             {
                 _ = SaveSettingsAsync();
+                _ = RefreshVisibleOverlayAsync();
             }
         }
     }
@@ -366,6 +423,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _overlayBackgroundOpacity, value))
             {
                 _ = SaveSettingsAsync();
+                _ = RefreshVisibleOverlayAsync();
             }
         }
     }
@@ -378,6 +436,24 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _overlayMaxWidth, value))
             {
                 _ = SaveSettingsAsync();
+                _ = RefreshVisibleOverlayAsync();
+            }
+        }
+    }
+
+    public string OverlayPositionMode
+    {
+        get => _overlayPositionMode;
+        set
+        {
+            var normalizedMode = value.Equals("smart", StringComparison.OrdinalIgnoreCase)
+                ? "smart"
+                : "locked";
+            if (SetProperty(ref _overlayPositionMode, normalizedMode))
+            {
+                OnPropertyChanged(nameof(OverlayPositionStatusText));
+                _ = SaveSettingsAsync();
+                _ = RefreshVisibleOverlayAsync();
             }
         }
     }
@@ -387,12 +463,37 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         get => _overlayPositionPreset;
         set
         {
-            if (SetProperty(ref _overlayPositionPreset, value))
+            var normalizedPreset = NormalizeOverlayPositionPreset(value);
+            if (SetProperty(ref _overlayPositionPreset, normalizedPreset))
             {
                 _ = SaveSettingsAsync();
+                _ = RefreshVisibleOverlayAsync();
             }
         }
     }
+
+    public bool OverlayPositionUnlocked
+    {
+        get => _overlayPositionUnlocked;
+        private set
+        {
+            if (SetProperty(ref _overlayPositionUnlocked, value))
+            {
+                OnPropertyChanged(nameof(OverlayPositionLockButtonLabel));
+                OnPropertyChanged(nameof(OverlayPositionStatusText));
+                _ = SaveSettingsAsync();
+                _ = RefreshVisibleOverlayAsync();
+            }
+        }
+    }
+
+    public string OverlayPositionLockButtonLabel => OverlayPositionUnlocked
+        ? "Lock Overlay Position"
+        : "Unlock Overlay Position";
+
+    public string OverlayPositionStatusText => OverlayPositionMode.Equals("smart", StringComparison.OrdinalIgnoreCase)
+        ? "Overlay position follows smart placement"
+        : "Overlay position locked";
 
     public string OverlayRenderMode
     {
@@ -403,6 +504,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(RecordingCompatibilityMode));
                 _ = SaveSettingsAsync();
+                _ = RefreshVisibleOverlayAsync();
             }
         }
     }
@@ -428,6 +530,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _overlayClickThrough, value))
             {
                 _ = SaveSettingsAsync();
+                _ = RefreshVisibleOverlayAsync();
             }
         }
     }
@@ -474,18 +577,31 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         await RefreshProfilesAsync(cancellationToken);
 
         var appSettings = await _appSettingsService.LoadAsync(cancellationToken);
+        _appMode = appSettings.AppMode;
+        _usageType = appSettings.UsageType;
+        _translationQuality = appSettings.TranslationQuality;
         _translationProvider = appSettings.Provider;
         _selectedTheme = ThemeService.NormalizeTheme(appSettings.Theme);
         _themeService.ApplyTheme(_selectedTheme);
         _useDeepLFreeApi = appSettings.UseDeepLFreeApi;
         _isAutoTranslateEnabled = appSettings.AutoTranslateEnabled;
         _autoTranslateIntervalMs = appSettings.AutoTranslateIntervalMs;
-        _hideOverlayWhenAutoTranslateStops = appSettings.HideOverlayWhenAutoTranslateStops;
         _overlayFontSize = appSettings.OverlayFontSize;
         _overlayOpacity = appSettings.OverlayOpacity;
         _overlayBackgroundOpacity = appSettings.OverlayBackgroundOpacity;
         _overlayMaxWidth = appSettings.OverlayMaxWidth;
-        _overlayPositionPreset = appSettings.OverlayPositionPreset;
+        _overlayPositionMode = appSettings.OverlayPositionMode.Equals("smart", StringComparison.OrdinalIgnoreCase)
+            ? "smart"
+            : "locked";
+        _overlayCustomLeft = appSettings.OverlayCustomLeft;
+        _overlayCustomTop = appSettings.OverlayCustomTop;
+        _overlayPositionPreset = NormalizeOverlayPositionPreset(appSettings.OverlayPositionPreset);
+        if (_overlayPositionPreset.Equals("custom", StringComparison.OrdinalIgnoreCase) &&
+            (!_overlayCustomLeft.HasValue || !_overlayCustomTop.HasValue))
+        {
+            _overlayPositionPreset = "bottom-center";
+        }
+        _overlayPositionUnlocked = appSettings.OverlayPositionUnlocked;
         _overlayRenderMode = appSettings.OverlayRenderMode;
         _overlayClickThrough = appSettings.OverlayClickThrough;
 
@@ -494,18 +610,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _translationProviderSettings.DeepLApiKey = decryptedKey;
         _translationProviderSettings.UseDeepLFreeApi = _useDeepLFreeApi;
 
+        OnPropertyChanged(nameof(AppMode));
+        OnPropertyChanged(nameof(IsSimpleMode));
+        OnPropertyChanged(nameof(IsAdvancedMode));
+        OnPropertyChanged(nameof(UsageType));
+        OnPropertyChanged(nameof(TranslationQuality));
         OnPropertyChanged(nameof(TranslationProvider));
         OnPropertyChanged(nameof(SelectedTheme));
         OnPropertyChanged(nameof(UseDeepLFreeApi));
         OnPropertyChanged(nameof(DeepLApiKey));
         OnPropertyChanged(nameof(IsAutoTranslateEnabled));
         OnPropertyChanged(nameof(AutoTranslateIntervalMs));
-        OnPropertyChanged(nameof(HideOverlayWhenAutoTranslateStops));
         OnPropertyChanged(nameof(OverlayFontSize));
         OnPropertyChanged(nameof(OverlayOpacity));
         OnPropertyChanged(nameof(OverlayBackgroundOpacity));
         OnPropertyChanged(nameof(OverlayMaxWidth));
+        OnPropertyChanged(nameof(OverlayPositionMode));
         OnPropertyChanged(nameof(OverlayPositionPreset));
+        OnPropertyChanged(nameof(OverlayPositionUnlocked));
+        OnPropertyChanged(nameof(OverlayPositionLockButtonLabel));
+        OnPropertyChanged(nameof(OverlayPositionStatusText));
         OnPropertyChanged(nameof(OverlayRenderMode));
         OnPropertyChanged(nameof(RecordingCompatibilityMode));
         OnPropertyChanged(nameof(OverlayClickThrough));
@@ -526,18 +650,24 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         var settings = new AppSettings
         {
+            AppMode = _appMode,
+            UsageType = _usageType,
+            TranslationQuality = _translationQuality,
             Provider = _translationProvider,
             EncryptedDeepLApiKey = _appSettingsService.EncryptApiKey(_deepLApiKey),
             UseDeepLFreeApi = _useDeepLFreeApi,
             Theme = _selectedTheme,
             AutoTranslateEnabled = _isAutoTranslateEnabled,
             AutoTranslateIntervalMs = _autoTranslateIntervalMs,
-            HideOverlayWhenAutoTranslateStops = _hideOverlayWhenAutoTranslateStops,
             OverlayFontSize = _overlayFontSize,
             OverlayOpacity = _overlayOpacity,
             OverlayBackgroundOpacity = _overlayBackgroundOpacity,
             OverlayMaxWidth = _overlayMaxWidth,
+            OverlayPositionMode = _overlayPositionMode,
             OverlayPositionPreset = _overlayPositionPreset,
+            OverlayCustomLeft = _overlayCustomLeft,
+            OverlayCustomTop = _overlayCustomTop,
+            OverlayPositionUnlocked = _overlayPositionUnlocked,
             OverlayRenderMode = _overlayRenderMode,
             OverlayClickThrough = _overlayClickThrough
         };
@@ -550,7 +680,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             IsAutoTranslateEnabled = false;
             StopAutoTranslate(
-                hideOverlay: HideOverlayWhenAutoTranslateStops,
+                hideOverlay: true,
                 updateStatus: true);
         }
         else
@@ -609,6 +739,41 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         StatusMessage = "Translation cleared.";
     }
 
+    private void ToggleOverlayPositionLock()
+    {
+        OverlayPositionUnlocked = !OverlayPositionUnlocked;
+        StatusMessage = OverlayPositionUnlocked
+            ? "Overlay position unlocked. Drag the overlay to move it."
+            : "Overlay position locked.";
+    }
+
+    private void OnOverlayPositionChanged(object? sender, OverlayPositionChangedEventArgs e)
+    {
+        _overlayCustomLeft = e.Left;
+        _overlayCustomTop = e.Top;
+
+        if (!OverlayPositionPreset.Equals("custom", StringComparison.OrdinalIgnoreCase))
+        {
+            OverlayPositionPreset = "custom";
+        }
+        else
+        {
+            _ = SaveSettingsAsync();
+        }
+
+        StatusMessage = "Overlay custom position saved.";
+    }
+
+    private async Task RefreshVisibleOverlayAsync()
+    {
+        if (!_overlayService.IsVisible || string.IsNullOrWhiteSpace(TranslatedText))
+        {
+            return;
+        }
+
+        await _overlayService.ShowTextAsync(TranslatedText, SelectedRegion, CreateOverlaySettings());
+    }
+
     private OverlaySettings CreateOverlaySettings()
     {
         return new OverlaySettings(
@@ -616,9 +781,27 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             OverlayOpacity,
             OverlayBackgroundOpacity,
             OverlayMaxWidth,
+            OverlayPositionMode,
             OverlayPositionPreset,
+            _overlayCustomLeft,
+            _overlayCustomTop,
             OverlayRenderMode,
+            OverlayPositionUnlocked,
             OverlayClickThrough);
+    }
+
+    private static string NormalizeOverlayPositionPreset(string value)
+    {
+        return value.ToLowerInvariant() switch
+        {
+            "top-center" => "top-center",
+            "middle-center" => "middle-center",
+            "bottom-center" => "bottom-center",
+            "above-ocr" => "above-ocr",
+            "below-ocr" => "below-ocr",
+            "custom" => "custom",
+            _ => "bottom-center"
+        };
     }
 
     private void StartAutoTranslate()
@@ -676,7 +859,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             SetStatus($"Auto translate error: {ex.Message}");
             IsAutoTranslateEnabled = false;
-            StopAutoTranslate(hideOverlay: HideOverlayWhenAutoTranslateStops, updateStatus: false);
+            StopAutoTranslate(hideOverlay: true, updateStatus: false);
         }
     }
 
@@ -823,7 +1006,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var region = await _regionSelectionService.SelectRegionAsync();
+            var mode = RegionSelectionMode.Auto;
+            if (UsageType.Equals("Fullscreen Game", StringComparison.OrdinalIgnoreCase))
+            {
+                mode = RegionSelectionMode.Screenshot;
+            }
+            else
+            {
+                mode = RegionSelectionMode.Live;
+            }
+
+            var region = await _regionSelectionService.SelectRegionAsync(mode);
             if (region is null || region.IsEmpty)
             {
                 StatusMessage = "Region selection cancelled.";
@@ -833,6 +1026,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             SelectedRegion = region;
             StatusMessage = "Region selected.";
             _pipeline.ResetState();
+            _ = RefreshVisibleOverlayAsync();
         }
         catch (Exception ex)
         {
@@ -969,6 +1163,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         StopAutoTranslate();
+        _overlayService.OverlayPositionChanged -= OnOverlayPositionChanged;
         _overlayService.Dispose();
         _translationLock.Dispose();
     }

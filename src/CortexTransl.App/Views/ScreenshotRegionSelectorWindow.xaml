@@ -1,0 +1,42 @@
+<Window x:Class="CortexTransl.App.Views.ScreenshotRegionSelectorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Select Region (Screenshot Mode)"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        Topmost="True"
+        ShowInTaskbar="False"
+        Background="Black"
+        Cursor="Cross">
+
+    <Grid>
+        <!-- The screenshot image -->
+        <Image x:Name="ScreenshotImage" Stretch="None" HorizontalAlignment="Left" VerticalAlignment="Top" />
+
+        <!-- Overlay dim -->
+        <Border Background="#66000000" IsHitTestVisible="False" />
+
+        <!-- The selection canvas -->
+        <Canvas x:Name="SelectionCanvas" Background="Transparent"
+                MouseLeftButtonDown="OnMouseLeftButtonDown"
+                MouseMove="OnMouseMove"
+                MouseLeftButtonUp="OnMouseLeftButtonUp">
+            
+            <Border x:Name="SelectionBorder"
+                    BorderBrush="{DynamicResource AccentBrush}"
+                    BorderThickness="2"
+                    Background="#220078D7"
+                    Visibility="Collapsed" />
+        </Canvas>
+        
+        <!-- Helpful text -->
+        <TextBlock Text="Screenshot Mode. Drag to select dialogue region. Press ESC to cancel."
+                   Foreground="White"
+                   Background="#AA000000"
+                   Padding="10,5"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Top"
+                   Margin="0,20,0,0"
+                   IsHitTestVisible="False" />
+    </Grid>
+</Window>

@@ -4,6 +4,14 @@ namespace CortexTransl.App.Models;
 
 public sealed class AppSettings
 {
+    public bool HasRunSetupWizard { get; set; } = false;
+
+    public string AppMode { get; set; } = "Simple";
+
+    public string UsageType { get; set; } = "Game";
+
+    public string TranslationQuality { get; set; } = "Balanced";
+
     public string Provider { get; set; } = "placeholder";
 
     public string EncryptedDeepLApiKey { get; set; } = string.Empty;
@@ -16,8 +24,6 @@ public sealed class AppSettings
 
     public double AutoTranslateIntervalMs { get; set; } = 700;
 
-    public bool HideOverlayWhenAutoTranslateStops { get; set; } = true;
-
     public double OverlayFontSize { get; set; } = 32;
 
     public double OverlayOpacity { get; set; } = 1;
@@ -26,7 +32,15 @@ public sealed class AppSettings
 
     public double OverlayMaxWidth { get; set; } = 920;
 
-    public string OverlayPositionPreset { get; set; } = "custom";
+    public string OverlayPositionMode { get; set; } = "locked";
+
+    public string OverlayPositionPreset { get; set; } = "bottom-center";
+
+    public double? OverlayCustomLeft { get; set; }
+
+    public double? OverlayCustomTop { get; set; }
+
+    public bool OverlayPositionUnlocked { get; set; } = false;
 
     public string OverlayRenderMode { get; set; } = "transparent";
 

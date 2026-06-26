@@ -12,8 +12,13 @@ public sealed class OverlayService : IOverlayService
 
     private OverlayWindow? _overlayWindow;
     private OverlayRequest? _lastAppliedRequest;
+    private OverlayLayoutRequest? _lastLayoutRequest;
     private DateTimeOffset _lastVisualUpdateUtc = DateTimeOffset.MinValue;
     private bool? _currentRecordingSafeMode;
+
+    public event EventHandler<OverlayPositionChangedEventArgs>? OverlayPositionChanged;
+
+    public bool IsVisible => _overlayWindow?.IsVisible == true;
 
     public async Task<long> ShowTextAsync(
         string text,
@@ -34,7 +39,8 @@ public sealed class OverlayService : IOverlayService
         await _updateGate.WaitAsync(cancellationToken);
         try
         {
-            if (_lastAppliedRequest == request && _overlayWindow?.IsVisible == true)
+            var layoutRequest = OverlayLayoutRequest.From(request);
+            if (_lastAppliedRequest == request && _lastLayoutRequest == layoutRequest && _overlayWindow?.IsVisible == true)
             {
                 return 0;
             }
@@ -55,10 +61,14 @@ public sealed class OverlayService : IOverlayService
                 _overlayWindow.Show();
             }
 
-            _overlayWindow.UpdateText(request.Text, request.Region, request.Settings);
+            var shouldUpdatePosition = request.Settings.UsesSmartPlacement ||
+                _lastLayoutRequest != layoutRequest;
+
+            _overlayWindow.UpdateText(request.Text, request.Region, request.Settings, shouldUpdatePosition);
             stopwatch.Stop();
 
             _lastAppliedRequest = request;
+            _lastLayoutRequest = layoutRequest;
             _lastVisualUpdateUtc = DateTimeOffset.UtcNow;
             return stopwatch.ElapsedMilliseconds;
         }
@@ -93,23 +103,57 @@ public sealed class OverlayService : IOverlayService
             return;
         }
 
-        _overlayWindow?.Close();
+        if (_overlayWindow is not null)
+        {
+            _overlayWindow.PositionChanged -= OnOverlayPositionChanged;
+            _overlayWindow.Close();
+        }
+
         _overlayWindow = new OverlayWindow(settings.IsRecordingSafe);
+        _overlayWindow.PositionChanged += OnOverlayPositionChanged;
         _currentRecordingSafeMode = settings.IsRecordingSafe;
         _lastAppliedRequest = null;
+        _lastLayoutRequest = null;
         _overlayWindow.Show();
+    }
+
+    private void OnOverlayPositionChanged(object? sender, OverlayPositionChangedEventArgs e)
+    {
+        _lastAppliedRequest = null;
+        _lastLayoutRequest = null;
+        OverlayPositionChanged?.Invoke(this, e);
     }
 
     private static OverlaySettings NormalizeSettings(OverlaySettings settings)
     {
+        var positionMode = settings.PositionMode.Equals("smart", StringComparison.OrdinalIgnoreCase)
+            ? "smart"
+            : "locked";
+
         return settings with
         {
             FontSize = Math.Clamp(settings.FontSize, 18, 72),
             Opacity = Math.Clamp(settings.Opacity, 0.35, 1),
             BackgroundOpacity = Math.Clamp(settings.BackgroundOpacity, 0.35, 1),
             MaxWidth = Math.Clamp(settings.MaxWidth, 280, 1400),
-            PositionPreset = string.IsNullOrWhiteSpace(settings.PositionPreset) ? "custom" : settings.PositionPreset,
-            RenderMode = string.IsNullOrWhiteSpace(settings.RenderMode) ? "transparent" : settings.RenderMode
+            PositionMode = positionMode,
+            PositionPreset = NormalizePreset(settings.PositionPreset),
+            RenderMode = string.IsNullOrWhiteSpace(settings.RenderMode) ? "transparent" : settings.RenderMode,
+            ClickThrough = !settings.PositionUnlocked && settings.ClickThrough
+        };
+    }
+
+    private static string NormalizePreset(string preset)
+    {
+        return preset.ToLowerInvariant() switch
+        {
+            "top-center" => "top-center",
+            "middle-center" => "middle-center",
+            "bottom-center" => "bottom-center",
+            "above-ocr" => "above-ocr",
+            "below-ocr" => "below-ocr",
+            "custom" => "custom",
+            _ => "bottom-center"
         };
     }
 
@@ -117,4 +161,30 @@ public sealed class OverlayService : IOverlayService
         string Text,
         CaptureRegion Region,
         OverlaySettings Settings);
+
+    private sealed record OverlayLayoutRequest(
+        CaptureRegion Region,
+        string PositionMode,
+        string PositionPreset,
+        double? CustomLeft,
+        double? CustomTop,
+        double FontSize,
+        double MaxWidth,
+        bool IsRecordingSafe,
+        string ScreenLayoutKey)
+    {
+        public static OverlayLayoutRequest From(OverlayRequest request)
+        {
+            return new OverlayLayoutRequest(
+                request.Region,
+                request.Settings.PositionMode,
+                request.Settings.PositionPreset,
+                request.Settings.CustomLeft,
+                request.Settings.CustomTop,
+                request.Settings.FontSize,
+                request.Settings.MaxWidth,
+                request.Settings.IsRecordingSafe,
+                OverlayWindow.GetScreenLayoutKey());
+        }
+    }
 }

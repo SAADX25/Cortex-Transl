@@ -1,141 +1,73 @@
-# Cortex Transl
+<h1 align="center">Cortex Transl</h1>
 
-Cortex Transl is a Windows desktop MVP for translating dialogue from offline, single-player story games using screen capture only.
+<p align="center">
+  <strong>A smart, simple, and safe real-time screen translation assistant.</strong>
+</p>
 
-## Current Status
+---
 
-`v0.1-alpha` is the stable MVP checkpoint. It focuses on the manual capture workflow only:
+## 🌟 Overview
 
-- Select a dialogue rectangle on screen.
-- Capture only that selected region.
-- Run Windows OCR.
-- Translate to Arabic through the offline placeholder provider.
-- Display original and translated text in the app.
-- Show translated text in a transparent topmost overlay.
-- Trigger capture with the `Capture & Translate` button or global `F8`.
-- Cache successful translations in SQLite.
-- Save and reload basic game profiles.
-- Show debug indicators for capture time, OCR time, cache hit/miss/skipped, translation time, and overlay update time.
+**Cortex Transl** is a Windows desktop application designed to translate dialogue from offline, single-player story games, visual novels, and videos in real-time. It acts as a smart gaming assistant that brings language accessibility to your favorite media without complicated setups or technical jargon.
 
-`v0.1-alpha` was tagged after a clean Release build as commit `61b0573`.
+## ✨ Key Features
 
-`v0.2` is now in progress. It keeps the same MVP workflow and adds:
+- **Smart and Simple:** No need to understand OCR engines, cache debugging, or overlay render modes. The app guides you through a setup wizard and uses smart defaults based on what you are trying to translate.
+- **Safe and Secure:** Cortex Transl does not use DLL injection, DirectX hooks, or game process hooks. It will not bypass anti-cheat systems. It operates purely on screen capture.
+- **Setup Wizard:** First-time users are guided through selecting their usage type (Game, Visual Novel, Video, or Fullscreen Game), their translation provider, and selecting a region.
+- **Simple Mode vs Advanced Mode:** 
+  - **Simple Mode:** Focuses on what matters: selecting regions, starting translation, choosing translation quality, and adjusting basic overlay settings.
+  - **Advanced Mode:** Unlocks OCR engine selection, advanced render modes, click-through overlay toggles, profile management, and detailed debug metrics.
+- **Smart Region Selection:** The app automatically selects the best way to capture your screen depending on your chosen Usage Type (e.g., using a Screenshot Selector for exclusive fullscreen games).
+- **Subtitles-like Overlay:** By default, the overlay acts like a locked subtitle bar at the bottom center of your screen, appearing and disappearing smoothly as translations run or stop.
+- **DeepL Support:** Uses DeepL for high-quality translations (requires an API key).
 
-- DeepL as the first real translation provider behind the existing provider abstraction.
-- The existing offline Placeholder provider for deterministic testing.
-- A simple DeepL API key field and Free/Pro endpoint toggle.
-- Provider status in the debug area.
-- Friendly provider errors for missing API key, rejected key, network failure, rate limit, quota exceeded, and empty/invalid translation response.
-- Conservative OCR preprocessing for the selected region: modest upscaling for small text, grayscale conversion, contrast boost, and alpha compositing over white.
+## 🚀 Quick Start
 
-## Scope
+1. **Launch the App:** Run Cortex Transl. The first time you launch it, a friendly Setup Wizard will help you configure the basics.
+2. **Select Your Target:** Choose whether you're translating a Windowed Game, a Visual Novel, or a Fullscreen Game.
+3. **Select Region (`F9`):** Draw a rectangle around the area where dialogue usually appears.
+4. **Auto Translate (`F8`):** Press `F8` to start auto-translating. The app will capture the region and display translations on a transparent overlay at the bottom of your screen. 
+5. **Stop Translating (`F8`):** Press `F8` again to hide the subtitles and stop the translation engine.
 
-- WPF desktop UI on .NET 10+
-- User-selected screen region capture
-- Windows OCR implementation behind an OCR abstraction
-- Placeholder Arabic translation provider and DeepL provider behind a translation abstraction
-- SQLite cache for successful translations and game profiles
-- Transparent topmost overlay
-- Global `F8` hotkey for capture and translate
+> **💡 Pro Tip:** For the best experience, we strongly recommend running your games in **Borderless Windowed** mode. This allows the transparent overlay to render smoothly on top of your game and ensures reliable live region selection.
 
-## Manual Test Results
+## ⌨️ Keyboard Shortcuts
 
-Latest stable MVP checkpoint artifact:
+| Shortcut | Action |
+|----------|--------|
+| `F8` | Toggle Auto Translate On / Off |
+| `F9` | Open Region Selector |
+| `F10` | Run Capture Once (Single frame translation) |
 
-`artifacts/manual-test-20260626-115333/manual-test-result.json`
+## 🛠️ Requirements & Setup
 
-Latest v0.2 controlled manual workflow artifact:
+- **OS:** Windows 10 or Windows 11
+- **Runtime:** .NET 10 Runtime (or newer)
+- **DeepL API Key:** To use DeepL translations, you must provide your own API key in the app's settings. Your key is securely encrypted using Windows DPAPI before being saved to your local machine.
 
-`artifacts/v0.2-manual-test-20260626-123208/manual-test-result.json`
-
-Validated workflow:
-
-- No selected region shows a clear warning.
-- Region selection worked on a multi-monitor setup.
-- Saved profile reused coordinates `X 90, Y 410, W 750, H 105`.
-- `Capture & Translate` detected high-contrast dialogue text.
-- `F8` captured repeatedly without visible overlap crashes.
-- Overlay appeared above the dialogue target and updated.
-- Repeated unchanged capture skipped OCR and translation.
-- Repeated text after changing away and back loaded from SQLite cache.
-- Invalid off-screen capture is handled with a friendly message.
-
-Observed OCR results:
-
-- High-contrast text: `WHERE ARE WE?` -> accurate.
-- High-contrast text: `HELLO` -> accurate.
-
-Observed timings on the controlled test target:
-
-- Initial capture path: capture `14 ms`, OCR `94 ms`, cache miss, translation `0 ms`, overlay `46 ms`.
-- Cache hit path: capture `6 ms`, OCR `10 ms`, cache hit, overlay `11 ms`.
-
-v0.2 controlled dialogue-source pass:
-
-- Selected region was saved and reloaded as `X 95, Y 125, W 750, H 167`.
-- `Capture & Translate` button worked on high-contrast English text.
-- Rapid `F8` presses reused unchanged OCR/translation state without overlapping failures.
-- Profile reload reused the saved region and loaded the repeated translation from SQLite cache.
-- Overlay appeared above the dialogue target and updated with Arabic placeholder translations.
-- DeepL missing-key flow showed a friendly UI message and did not crash.
-
-v0.2 OCR observations:
-
-- High contrast: `WHERE ARE WE?` -> exact.
-- Small text: `HELLO.` -> exact after preprocessing.
-- Stylized/game-like font: `GAME OVER` -> exact.
-
-v0.2 observed timings:
-
-- Initial high-contrast capture: capture `15 ms`, OCR `230 ms`, cache miss, translation `0 ms`, overlay `48 ms`.
-- Rapid unchanged `F8`: capture `5-9 ms`, OCR skipped, translation skipped, overlay `2-3 ms`.
-- Profile reload cache hit: capture `13 ms`, OCR `125 ms`, cache hit, overlay `51 ms`.
-- Small text: capture `9 ms`, OCR `40 ms`, cache miss, overlay `20 ms`.
-- Stylized text: capture `11 ms`, OCR `37 ms`, cache miss, overlay `17 ms`.
-- DeepL missing-key path: capture `4 ms`, OCR `39 ms`, cache miss, provider error in `42 ms`.
-
-## Safety Boundaries
-
-This project does not inject code, hook game processes, modify game files, bypass anti-cheat systems, or inspect game memory. It only captures the user-selected rectangle of the screen.
-
-## Known Limitations
-
-- DeepL is wired in `v0.2`, but live translation requires a user-provided API key.
-- Windows OCR quality depends heavily on contrast, font size, and selected region accuracy.
-- There is no installer yet.
-- There is no auto-capture mode yet.
-- API-backed providers, advanced AI modes, and story/context translation are intentionally not included in this checkpoint.
-- API keys and provider-specific settings are not persisted yet.
-- The v0.2 OCR pass used controlled desktop dialogue-source windows, not a real game executable.
-- Network, rate-limit, and quota provider paths are handled in code but were not live-tested because no DeepL API key was available.
-
-## Build
+### Building from Source
 
 Install the .NET 10 SDK or newer, then run:
 
 ```powershell
+git clone https://github.com/your-username/Cortex-Transl.git
+cd Cortex-Transl
 dotnet restore
 dotnet build
 ```
 
-## Developer Quick Start
+Double-click `Cortex_Dev.bat` from the repository root to restore, build Debug, and run the app.
 
-Double-click `Cortex_Dev.bat` from the repository root to restore, build Debug, and run `CortexTransl.App`.
+## ⚠️ Troubleshooting
 
-The runtime database is stored under `%LOCALAPPDATA%\Cortex Transl\cortex-transl.db`.
+**The overlay is flickering or invisible during recording!**
+If NVIDIA ShadowPlay or OBS is making the overlay flicker, enable **Recording Compatibility Mode** in the Overlay settings. Alternatively, capture your entire desktop instead of a specific game window.
 
-For DeepL testing, set `CORTEX_TRANSL_DEEPL_API_KEY` before launch or paste the key into the app. Keep the Placeholder provider selected for offline testing.
+**The app can't select a region in my game!**
+If your game forces exclusive fullscreen, make sure to select "Fullscreen Game" in the setup wizard or usage type. The app will automatically switch to "Screenshot Selector" mode to help you safely select a region without minimizing your game.
 
-## Keyboard Shortcuts
-
-- `F8` toggles Auto Translate on or off.
-- `F9` opens Select Region.
-- `F10` runs Capture Once.
-
-## Overlay Troubleshooting
-
-If NVIDIA recording or ShadowPlay makes the overlay flicker, enable Recording Compatibility Mode in the Overlay settings. If the overlay is missing from the recording, try recording the desktop instead of game-only capture, switch the game to borderless window mode, or change the recorder capture mode.
-
-## Next Milestone
-
-Continue `v0.2` with live DeepL validation using a real key, more real game/video samples, and targeted OCR preprocessing tweaks only where the current selected-region workflow needs them.
+---
+<p align="center">
+  <i>Built to make games accessible to everyone.</i>
+</p>

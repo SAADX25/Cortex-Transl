@@ -1,4 +1,4 @@
-﻿<Window x:Class="CortexTransl.App.Views.MainWindow"
+<Window x:Class="CortexTransl.App.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Cortex Transl"
@@ -15,11 +15,8 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <!-- Top header bar -->
             <RowDefinition Height="Auto" />
-            <!-- Main content -->
             <RowDefinition Height="*" />
-            <!-- Status footer -->
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -31,27 +28,23 @@
                 Padding="20,12">
             <DockPanel LastChildFill="False">
 
-                <!-- App identity -->
-                <StackPanel DockPanel.Dock="Left" Orientation="Vertical" VerticalAlignment="Center">
+                <!-- App identity & Mode -->
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="Cortex Transl"
                                FontSize="20"
                                FontWeight="Bold"
-                               Foreground="{DynamicResource PrimaryTextBrush}" />
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               Margin="0,0,20,0" />
+
+                    <Button Content="Setup Wizard"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="RunSetupWizard_Click"
+                            Margin="15,0,0,0"
+                            Padding="10,2" />
                 </StackPanel>
 
                 <!-- Region + quick action buttons -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-
-                    <!-- Region display pill -->
-                    <Border Style="{StaticResource StatusPill}"
-                            Margin="0,0,12,0">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding SelectedRegionDisplay}"
-                                       FontSize="12"
-                                       Foreground="{DynamicResource StatusPillTextBrush}"
-                                       VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Border>
 
                     <Button Content="Select Region"
                             Style="{StaticResource SecondaryButton}"
@@ -113,6 +106,13 @@
                                       SelectedValue="{Binding SelectedTheme, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                       Margin="0,0,0,10" />
 
+                            <TextBlock Text="Translation Quality" Style="{StaticResource InputLabel}" />
+                            <ComboBox ItemsSource="{Binding TranslationQualityOptions}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding TranslationQuality, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,0,0,10" />
+
                             <TextBlock Text="Source Language" Style="{StaticResource InputLabel}" />
                             <ComboBox ItemsSource="{Binding SourceLanguageOptions}"
                                       DisplayMemberPath="Name"
@@ -127,12 +127,14 @@
                                       SelectedValue="{Binding TargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                       Margin="0,0,0,10" />
 
-                            <TextBlock Text="OCR Engine" Style="{StaticResource InputLabel}" />
-                            <ComboBox ItemsSource="{Binding OcrEngineOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding OcrEngine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      Margin="0,0,0,10" />
+                            <StackPanel Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="OCR Engine" Style="{StaticResource InputLabel}" />
+                                <ComboBox ItemsSource="{Binding OcrEngineOptions}"
+                                          DisplayMemberPath="Name"
+                                          SelectedValuePath="Id"
+                                          SelectedValue="{Binding OcrEngine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,0,0,10" />
+                            </StackPanel>
 
                             <TextBlock Text="Provider" Style="{StaticResource InputLabel}" />
                             <ComboBox ItemsSource="{Binding TranslationProviderOptions}"
@@ -183,7 +185,7 @@
                     </Border>
 
                     <!-- Auto Translate -->
-                    <Border Style="{StaticResource CardBorder}">
+                    <Border Style="{StaticResource CardBorder}" Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <TextBlock Text="AUTO TRANSLATE" Style="{StaticResource SectionTitle}" />
 
@@ -204,7 +206,6 @@
                                 </TextBlock.Style>
                             </TextBlock>
 
-
                             <TextBlock Text="Interval" Style="{StaticResource InputLabel}" />
                             <DockPanel>
                                 <TextBlock DockPanel.Dock="Right"
@@ -221,9 +222,6 @@
                                         Value="{Binding AutoTranslateIntervalMs, Mode=TwoWay}" />
                             </DockPanel>
 
-                            <CheckBox Content="Hide overlay when Auto Translate stops"
-                                      IsChecked="{Binding HideOverlayWhenAutoTranslateStops, Mode=TwoWay}"
-                                      Margin="0,10,0,0" />
                         </StackPanel>
                     </Border>
 
@@ -249,22 +247,8 @@
                                         ToolTip="Clear current text and reset translation state" />
                             </WrapPanel>
 
-                            <CheckBox Content="Recording Compatibility Mode"
-                                      IsChecked="{Binding RecordingCompatibilityMode, Mode=TwoWay}"
-                                      Margin="0,0,0,8" />
-
-                            <TextBlock Text="Render Mode" Style="{StaticResource InputLabel}" />
-                            <ComboBox ItemsSource="{Binding OverlayRenderModeOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding OverlayRenderMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      Margin="0,0,0,10" />
-
-                            <CheckBox Content="Click-through overlay"
-                                      IsChecked="{Binding OverlayClickThrough, Mode=TwoWay}"
-                                      Margin="0,0,0,8" />
-
-                            <TextBlock Text="Position" Style="{StaticResource InputLabel}" />
+                            <!-- Simple settings -->
+                            <TextBlock Text="Position Preset" Style="{StaticResource InputLabel}" />
                             <ComboBox ItemsSource="{Binding OverlayPositionOptions}"
                                       DisplayMemberPath="Name"
                                       SelectedValuePath="Id"
@@ -287,22 +271,6 @@
                                         Value="{Binding OverlayFontSize, Mode=TwoWay}" />
                             </DockPanel>
 
-                            <TextBlock Text="Max Width" Style="{StaticResource InputLabel}" />
-                            <DockPanel Margin="0,0,0,10">
-                                <TextBlock DockPanel.Dock="Right"
-                                           Text="{Binding OverlayMaxWidth, StringFormat={}{0:0}px}"
-                                           Width="58"
-                                           TextAlignment="Right"
-                                           VerticalAlignment="Center"
-                                           FontSize="12"
-                                           Foreground="{DynamicResource SecondaryTextBrush}" />
-                                <Slider Minimum="360"
-                                        Maximum="1400"
-                                        TickFrequency="40"
-                                        IsSnapToTickEnabled="True"
-                                        Value="{Binding OverlayMaxWidth, Mode=TwoWay}" />
-                            </DockPanel>
-
                             <TextBlock Text="Overlay Opacity" Style="{StaticResource InputLabel}" />
                             <DockPanel Margin="0,0,0,10">
                                 <TextBlock DockPanel.Dock="Right"
@@ -319,28 +287,82 @@
                                         Value="{Binding OverlayOpacity, Mode=TwoWay}" />
                             </DockPanel>
 
-                            <TextBlock Text="Background Opacity" Style="{StaticResource InputLabel}" />
-                            <DockPanel>
-                                <TextBlock DockPanel.Dock="Right"
-                                           Text="{Binding OverlayBackgroundOpacity, StringFormat={}{0:P0}}"
-                                           Width="48"
-                                           TextAlignment="Right"
-                                           VerticalAlignment="Center"
-                                           FontSize="12"
-                                           Foreground="{DynamicResource SecondaryTextBrush}" />
-                                <Slider Minimum="0.35"
-                                        Maximum="1"
-                                        TickFrequency="0.05"
-                                        IsSnapToTickEnabled="True"
-                                        Value="{Binding OverlayBackgroundOpacity, Mode=TwoWay}" />
-                            </DockPanel>
+                            <!-- Advanced settings -->
+                            <StackPanel Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="Overlay Position Mode" Style="{StaticResource InputLabel}" />
+                                <ComboBox ItemsSource="{Binding OverlayPositionModeOptions}"
+                                          DisplayMemberPath="Name"
+                                          SelectedValuePath="Id"
+                                          SelectedValue="{Binding OverlayPositionMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,0,0,6" />
+
+                                <TextBlock Text="{Binding OverlayPositionStatusText}"
+                                           Style="{StaticResource HintText}"
+                                           Margin="0,0,0,10" />
+
+                                <Button Content="{Binding OverlayPositionLockButtonLabel}"
+                                        Command="{Binding ToggleOverlayPositionLockCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        MinWidth="180"
+                                        HorizontalAlignment="Left"
+                                        Margin="0,0,0,10"
+                                        ToolTip="Unlock the overlay so it can be dragged to a custom position" />
+
+                                <CheckBox Content="Recording Compatibility Mode"
+                                          IsChecked="{Binding RecordingCompatibilityMode, Mode=TwoWay}"
+                                          Margin="0,0,0,8" />
+
+                                <TextBlock Text="Render Mode" Style="{StaticResource InputLabel}" />
+                                <ComboBox ItemsSource="{Binding OverlayRenderModeOptions}"
+                                          DisplayMemberPath="Name"
+                                          SelectedValuePath="Id"
+                                          SelectedValue="{Binding OverlayRenderMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,0,0,10" />
+
+                                <CheckBox Content="Click-through overlay"
+                                          IsChecked="{Binding OverlayClickThrough, Mode=TwoWay}"
+                                          Margin="0,0,0,8" />
+
+                                <TextBlock Text="Max Width" Style="{StaticResource InputLabel}" />
+                                <DockPanel Margin="0,0,0,10">
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding OverlayMaxWidth, StringFormat={}{0:0}px}"
+                                               Width="58"
+                                               TextAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <Slider Minimum="360"
+                                            Maximum="1400"
+                                            TickFrequency="40"
+                                            IsSnapToTickEnabled="True"
+                                            Value="{Binding OverlayMaxWidth, Mode=TwoWay}" />
+                                </DockPanel>
+
+                                <TextBlock Text="Background Opacity" Style="{StaticResource InputLabel}" />
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding OverlayBackgroundOpacity, StringFormat={}{0:P0}}"
+                                               Width="48"
+                                               TextAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource SecondaryTextBrush}" />
+                                    <Slider Minimum="0.35"
+                                            Maximum="1"
+                                            TickFrequency="0.05"
+                                            IsSnapToTickEnabled="True"
+                                            Value="{Binding OverlayBackgroundOpacity, Mode=TwoWay}" />
+                                </DockPanel>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 
                     <!-- Profile -->
                     <Expander Header="PROFILE" Margin="0,0,0,10"
                               Foreground="{DynamicResource SectionHeaderBrush}"
-                              FontWeight="SemiBold" FontSize="12">
+                              FontWeight="SemiBold" FontSize="12"
+                              Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
                         <Border Style="{StaticResource CardBorder}" Margin="0,8,0,0">
                             <StackPanel>
                                 <TextBlock Text="Profile Name" Style="{StaticResource InputLabel}" />
@@ -367,6 +389,23 @@
                             </StackPanel>
                         </Border>
                     </Expander>
+                    
+                    <!-- Glossary Placeholder -->
+                    <Expander Header="GLOSSARY" Margin="0,0,0,10"
+                              Foreground="{DynamicResource SectionHeaderBrush}"
+                              FontWeight="SemiBold" FontSize="12">
+                        <Border Style="{StaticResource CardBorder}" Margin="0,8,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Glossary and Dictionary features are coming soon. Context-aware story translation will be available in future updates."
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           Margin="0,0,0,8" />
+                                <Button Content="Manage Glossary (Coming Soon)"
+                                        Style="{StaticResource SecondaryButton}"
+                                        IsEnabled="False" />
+                            </StackPanel>
+                        </Border>
+                    </Expander>
 
                 </StackPanel>
             </ScrollViewer>
@@ -388,7 +427,7 @@
                 
                 <StackPanel>
                     <!-- Session Status / Last Activity Card -->
-                    <Border Style="{StaticResource CardBorder}">
+                    <Border Style="{StaticResource CardBorder}" Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <TextBlock Text="SESSION STATUS" Style="{StaticResource SectionTitle}" />
                             <ItemsControl ItemsSource="{Binding DebugMetrics}">
@@ -423,7 +462,15 @@
                     <!-- Live Translation Preview Card -->
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
-                            <TextBlock Text="LIVE TRANSLATION PREVIEW" Style="{StaticResource SectionTitle}" Foreground="{DynamicResource SuccessBrush}" />
+                            <DockPanel Margin="0,0,0,12">
+                                <Border Style="{StaticResource StatusPill}" DockPanel.Dock="Right">
+                                    <TextBlock Text="{Binding SelectedRegionDisplay}"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource StatusPillTextBrush}"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="LIVE TRANSLATION PREVIEW" Style="{StaticResource SectionTitle}" Foreground="{DynamicResource SuccessBrush}" VerticalAlignment="Center" Margin="0" />
+                            </DockPanel>
                             
                             <Border Style="{StaticResource TextPanel}">
                                 <Grid MinHeight="80" MaxHeight="250">
@@ -525,5 +572,3 @@
         </Border>
     </Grid>
 </Window>
-
-

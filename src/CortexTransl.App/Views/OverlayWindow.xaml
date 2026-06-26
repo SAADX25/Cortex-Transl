@@ -15,13 +15,34 @@
             BorderThickness="1"
             CornerRadius="8"
             Padding="24,16">
-        <TextBlock x:Name="TranslationText"
-                   TextWrapping="Wrap"
-                   TextAlignment="Center"
-                   FlowDirection="RightToLeft"
-                   Foreground="White"
-                   FontFamily="Segoe UI, Tahoma, Arial"
-                   FontWeight="SemiBold"
-                   MaxWidth="920" />
+        <Grid>
+            <TextBlock x:Name="TranslationText"
+                       TextWrapping="Wrap"
+                       TextAlignment="Center"
+                       FlowDirection="RightToLeft"
+                       Foreground="White"
+                       FontFamily="Segoe UI, Tahoma, Arial"
+                       FontWeight="SemiBold"
+                       MaxWidth="920" />
+
+            <Border x:Name="DragHandle"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Background="#EE111827"
+                    BorderBrush="#88FFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Cursor="SizeAll"
+                    Padding="8,3"
+                    Visibility="Collapsed"
+                    MouseLeftButtonDown="OnDragHandleMouseLeftButtonDown"
+                    ToolTip="Drag to move overlay">
+                <TextBlock Text="Move"
+                           FontSize="11"
+                           FontWeight="SemiBold"
+                           Foreground="White"
+                           FlowDirection="LeftToRight" />
+            </Border>
+        </Grid>
     </Border>
 </Window>

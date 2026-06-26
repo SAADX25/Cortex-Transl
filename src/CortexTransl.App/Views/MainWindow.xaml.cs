@@ -18,6 +18,7 @@ public partial class MainWindow : Window
 {
     private readonly GlobalHotkeyService _hotkeyService = new();
     private readonly MainViewModel _viewModel;
+    private readonly AppSettingsService _appSettingsService;
 
     public MainWindow()
     {
@@ -29,11 +30,12 @@ public partial class MainWindow : Window
         var timingLogger = new TimingLogger(paths.LogPath);
         var cacheRepository = new SqliteTranslationCacheRepository(connectionFactory);
         var profileRepository = new SqliteGameProfileRepository(connectionFactory);
-        var appSettingsService = new AppSettingsService(paths.DataDirectory);
+        _appSettingsService = new AppSettingsService(paths.DataDirectory);
         var themeService = new ThemeService();
         var translationProviderSettings = new TranslationProviderSettings();
+        var screenCaptureService = new ScreenCaptureService();
         var pipeline = new CaptureTranslatePipeline(
-            new ScreenCaptureService(),
+            screenCaptureService,
             [new WindowsOcrEngine()],
             [
                 new PlaceholderTranslationProvider(),
@@ -44,12 +46,12 @@ public partial class MainWindow : Window
 
         _viewModel = new MainViewModel(
             migrator,
-            new RegionSelectionService(),
+            new RegionSelectionService(screenCaptureService),
             pipeline,
             new OverlayService(),
             profileRepository,
             translationProviderSettings,
-            appSettingsService,
+            _appSettingsService,
             themeService,
             timingLogger);
 
@@ -63,6 +65,16 @@ public partial class MainWindow : Window
     {
         try
         {
+            var settings = await _appSettingsService.LoadAsync();
+            if (!settings.HasRunSetupWizard)
+            {
+                var wizard = new SetupWizardWindow(_appSettingsService)
+                {
+                    Owner = this
+                };
+                wizard.ShowDialog();
+            }
+
             await _viewModel.InitializeAsync();
 
             ApiKeyPasswordBox.Password = _viewModel.DeepLApiKey;
@@ -158,5 +170,27 @@ public partial class MainWindow : Window
     {
         _hotkeyService.Dispose();
         _viewModel.Dispose();
+    }
+
+    private void SimpleMode_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.AppMode = "Simple";
+    }
+
+    private void AdvancedMode_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.AppMode = "Advanced";
+    }
+
+    private void RunSetupWizard_Click(object sender, RoutedEventArgs e)
+    {
+        var wizard = new SetupWizardWindow(_appSettingsService)
+        {
+            Owner = this
+        };
+        wizard.ShowDialog();
+        
+        // Reload settings to apply the wizard choices
+        _ = _viewModel.InitializeAsync();
     }
 }
