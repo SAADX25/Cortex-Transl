@@ -5,64 +5,80 @@ using System.Windows.Interop;
 
 namespace CortexTransl.App.Services.Hotkeys;
 
+public class HotkeyEventArgs : EventArgs
+{
+    public Key Key { get; }
+    public HotkeyEventArgs(Key key) => Key = key;
+}
+
 public sealed class GlobalHotkeyService : IDisposable
 {
-    private const int HotkeyId = 0x4354;
     private const int WmHotkey = 0x0312;
     private const uint ModNoRepeat = 0x4000;
+    
+    // We will use the virtual key as the Hotkey ID to allow multiple registrations
+    private readonly HashSet<int> _registeredKeys = [];
 
     private HwndSource? _source;
     private nint _handle;
-    private bool _registered;
 
-    public event EventHandler? HotkeyPressed;
+    public event EventHandler<HotkeyEventArgs>? HotkeyPressed;
 
     public bool Register(Window window, Key key)
     {
-        if (_registered)
+        if (_handle == nint.Zero)
         {
-            return true;
+            _handle = new WindowInteropHelper(window).Handle;
+            _source = HwndSource.FromHwnd(_handle);
+            _source?.AddHook(WndProc);
         }
 
-        _handle = new WindowInteropHelper(window).Handle;
-        var source = HwndSource.FromHwnd(_handle);
-        if (source is null)
+        if (_source is null)
         {
             return false;
         }
 
-        source.AddHook(WndProc);
-        _source = source;
-
         var virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
-        _registered = RegisterHotKey(_handle, HotkeyId, ModNoRepeat, virtualKey);
-        if (!_registered)
+        int hotkeyId = (int)virtualKey;
+        
+        if (_registeredKeys.Contains(hotkeyId))
         {
-            source.RemoveHook(WndProc);
-            _source = null;
+            return true;
         }
 
-        return _registered;
+        bool registered = RegisterHotKey(_handle, hotkeyId, ModNoRepeat, virtualKey);
+        if (registered)
+        {
+            _registeredKeys.Add(hotkeyId);
+        }
+
+        return registered;
     }
 
     public void Dispose()
     {
-        if (_registered)
+        foreach (var id in _registeredKeys)
         {
-            UnregisterHotKey(_handle, HotkeyId);
-            _registered = false;
+            UnregisterHotKey(_handle, id);
         }
+        _registeredKeys.Clear();
 
         _source?.RemoveHook(WndProc);
         _source = null;
+        _handle = nint.Zero;
     }
 
     private nint WndProc(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
     {
-        if (msg == WmHotkey && wParam.ToInt32() == HotkeyId)
+        if (msg == WmHotkey)
         {
-            HotkeyPressed?.Invoke(this, EventArgs.Empty);
-            handled = true;
+            int id = wParam.ToInt32();
+            if (_registeredKeys.Contains(id))
+            {
+                Key key = KeyInterop.KeyFromVirtualKey(id);
+                HotkeyPressed?.Invoke(this, new HotkeyEventArgs(key));
+                handled = true;
+            }
         }
 
         return nint.Zero;

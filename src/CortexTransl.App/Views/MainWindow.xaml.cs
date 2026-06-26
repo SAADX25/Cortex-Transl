@@ -65,14 +65,19 @@ public partial class MainWindow : Window
 
             ApiKeyPasswordBox.Password = _viewModel.DeepLApiKey;
 
-            if (_hotkeyService.Register(this, Key.F8))
+            bool f8Registered = _hotkeyService.Register(this, Key.F8);
+            bool f9Registered = _hotkeyService.Register(this, Key.F9);
+            bool f10Registered = _hotkeyService.Register(this, Key.F10);
+
+            if (f8Registered && f9Registered && f10Registered)
             {
                 _hotkeyService.HotkeyPressed += OnHotkeyPressed;
-                _viewModel.SetStatus("Ready. Select a dialogue region to begin. F8 is enabled.");
+                _viewModel.SetStatus("Ready. Select a dialogue region to begin. Hotkeys enabled.");
             }
             else
             {
-                _viewModel.SetStatus("Ready, but F8 could not be registered. It may already be in use.");
+                _hotkeyService.HotkeyPressed += OnHotkeyPressed;
+                _viewModel.SetStatus("Ready, but some hotkeys could not be registered. They may already be in use.");
             }
         }
         catch (Exception ex)
@@ -106,11 +111,40 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnHotkeyPressed(object? sender, EventArgs e)
+    private async void OnHotkeyPressed(object? sender, HotkeyEventArgs e)
     {
         try
         {
-            await await Dispatcher.InvokeAsync(() => _viewModel.CaptureAndTranslateCommand.ExecuteAsync());
+            if (e.Key == Key.F8)
+            {
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (_viewModel.ToggleAutoTranslateCommand.CanExecute(null))
+                    {
+                        _viewModel.ToggleAutoTranslateCommand.Execute(null);
+                    }
+                });
+            }
+            else if (e.Key == Key.F9)
+            {
+                await Dispatcher.InvokeAsync(async () =>
+                {
+                    if (_viewModel.SelectRegionCommand.CanExecute(null))
+                    {
+                        await _viewModel.SelectRegionCommand.ExecuteAsync(null);
+                    }
+                });
+            }
+            else if (e.Key == Key.F10)
+            {
+                await Dispatcher.InvokeAsync(async () =>
+                {
+                    if (_viewModel.CaptureAndTranslateCommand.CanExecute(null))
+                    {
+                        await _viewModel.CaptureAndTranslateCommand.ExecuteAsync(null);
+                    }
+                });
+            }
         }
         catch (Exception ex)
         {

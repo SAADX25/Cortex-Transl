@@ -1,4 +1,4 @@
-using CortexTransl.App.Data;
+﻿using CortexTransl.App.Data;
 using CortexTransl.App.Models;
 using CortexTransl.App.Services.Capture;
 using CortexTransl.App.Services.Overlay;
@@ -29,7 +29,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _ocrEngine = "windows";
     private string _translationProvider = "placeholder";
     private double _overlayFontSize = 32;
-    private double _overlayOpacity = 0.86;
+    private double _overlayOpacity = 1;
+    private double _overlayBackgroundOpacity = 0.86;
+    private double _overlayMaxWidth = 920;
+    private string _overlayPositionPreset = "custom";
+    private string _overlayRenderMode = "transparent";
+    private bool _overlayClickThrough = true;
     private string _originalText = string.Empty;
     private string _translatedText = string.Empty;
     private string _statusMessage = "Ready. Select a dialogue region to begin.";
@@ -41,6 +46,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private double _autoTranslateIntervalMs = 700;
     private CancellationTokenSource? _autoTranslateCts;
     private string _autoTranslateStatusText = "Auto Translate: Stopped";
+    private bool _isFocusMode = false;
 
     public MainViewModel(
         DatabaseMigrator databaseMigrator,
@@ -66,6 +72,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         SaveProfileCommand = new AsyncRelayCommand(_ => SaveProfileAsync(), _ => !SelectedRegion.IsEmpty);
         LoadSelectedProfileCommand = new RelayCommand(_ => LoadSelectedProfile(), _ => SelectedProfile is not null);
         ToggleAutoTranslateCommand = new RelayCommand(_ => ToggleAutoTranslate());
+        ToggleFocusModeCommand = new RelayCommand(_ => ToggleFocusMode());
+        ShowOverlayCommand = new AsyncRelayCommand(_ => ShowOverlayAsync());
+        HideOverlayCommand = new RelayCommand(_ => HideOverlay());
         ResetDebugMetrics();
     }
 
@@ -97,6 +106,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         new("deepl", "DeepL")
     ];
 
+    public IReadOnlyList<OptionItem> OverlayRenderModeOptions { get; } =
+    [
+        new("transparent", "Transparent / Fancy"),
+        new("recording-safe", "Recording Safe")
+    ];
+
+    public IReadOnlyList<OptionItem> OverlayPositionOptions { get; } =
+    [
+        new("custom", "Custom"),
+        new("bottom-center", "Bottom Center"),
+        new("top-center", "Top Center")
+    ];
+
     public ObservableCollection<GameProfile> Profiles { get; } = [];
 
     public ObservableCollection<TimingEntry> LastTimings { get; } = [];
@@ -112,6 +134,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public RelayCommand LoadSelectedProfileCommand { get; }
 
     public RelayCommand ToggleAutoTranslateCommand { get; }
+
+    public RelayCommand ToggleFocusModeCommand { get; }
+
+    public AsyncRelayCommand ShowOverlayCommand { get; }
+
+    public RelayCommand HideOverlayCommand { get; }
+
+    public bool IsFocusMode
+    {
+        get => _isFocusMode;
+        set => SetProperty(ref _isFocusMode, value);
+    }
 
     public CaptureRegion SelectedRegion
     {
@@ -223,7 +257,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string AutoTranslateButtonLabel => IsAutoTranslateEnabled ? "⏹ Stop Auto Translate" : "▶ Start Auto Translate";
+    public string AutoTranslateButtonLabel => IsAutoTranslateEnabled ? "Stop Auto Translate" : "Start Auto Translate";
 
     public string AutoTranslateStatusText
     {
@@ -239,7 +273,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (TranslationProvider.Equals("placeholder", StringComparison.OrdinalIgnoreCase))
                 return "Testing mode only. No real translation.";
             if (TranslationProvider.Equals("deepl", StringComparison.OrdinalIgnoreCase))
-                return string.IsNullOrWhiteSpace(DeepLApiKey) ? "API key missing" : "API key ready ✓";
+                return string.IsNullOrWhiteSpace(DeepLApiKey) ? "API key missing" : "API key ready";
             return string.Empty;
         }
     }
@@ -261,13 +295,99 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public double OverlayFontSize
     {
         get => _overlayFontSize;
-        set => SetProperty(ref _overlayFontSize, value);
+        set
+        {
+            if (SetProperty(ref _overlayFontSize, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
     }
 
     public double OverlayOpacity
     {
         get => _overlayOpacity;
-        set => SetProperty(ref _overlayOpacity, value);
+        set
+        {
+            if (SetProperty(ref _overlayOpacity, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public double OverlayBackgroundOpacity
+    {
+        get => _overlayBackgroundOpacity;
+        set
+        {
+            if (SetProperty(ref _overlayBackgroundOpacity, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public double OverlayMaxWidth
+    {
+        get => _overlayMaxWidth;
+        set
+        {
+            if (SetProperty(ref _overlayMaxWidth, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public string OverlayPositionPreset
+    {
+        get => _overlayPositionPreset;
+        set
+        {
+            if (SetProperty(ref _overlayPositionPreset, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public string OverlayRenderMode
+    {
+        get => _overlayRenderMode;
+        set
+        {
+            if (SetProperty(ref _overlayRenderMode, value))
+            {
+                OnPropertyChanged(nameof(RecordingCompatibilityMode));
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public bool RecordingCompatibilityMode
+    {
+        get => OverlayRenderMode.Equals("recording-safe", StringComparison.OrdinalIgnoreCase);
+        set
+        {
+            var nextMode = value ? "recording-safe" : "transparent";
+            if (!OverlayRenderMode.Equals(nextMode, StringComparison.OrdinalIgnoreCase))
+            {
+                OverlayRenderMode = nextMode;
+            }
+        }
+    }
+
+    public bool OverlayClickThrough
+    {
+        get => _overlayClickThrough;
+        set
+        {
+            if (SetProperty(ref _overlayClickThrough, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
     }
 
     public string OriginalText
@@ -316,7 +436,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _useDeepLFreeApi = appSettings.UseDeepLFreeApi;
         _isAutoTranslateEnabled = appSettings.AutoTranslateEnabled;
         _autoTranslateIntervalMs = appSettings.AutoTranslateIntervalMs;
-        
+        _overlayFontSize = appSettings.OverlayFontSize;
+        _overlayOpacity = appSettings.OverlayOpacity;
+        _overlayBackgroundOpacity = appSettings.OverlayBackgroundOpacity;
+        _overlayMaxWidth = appSettings.OverlayMaxWidth;
+        _overlayPositionPreset = appSettings.OverlayPositionPreset;
+        _overlayRenderMode = appSettings.OverlayRenderMode;
+        _overlayClickThrough = appSettings.OverlayClickThrough;
+
         var decryptedKey = _appSettingsService.DecryptApiKey(appSettings.EncryptedDeepLApiKey);
         _deepLApiKey = decryptedKey;
         _translationProviderSettings.DeepLApiKey = decryptedKey;
@@ -327,6 +454,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DeepLApiKey));
         OnPropertyChanged(nameof(IsAutoTranslateEnabled));
         OnPropertyChanged(nameof(AutoTranslateIntervalMs));
+        OnPropertyChanged(nameof(OverlayFontSize));
+        OnPropertyChanged(nameof(OverlayOpacity));
+        OnPropertyChanged(nameof(OverlayBackgroundOpacity));
+        OnPropertyChanged(nameof(OverlayMaxWidth));
+        OnPropertyChanged(nameof(OverlayPositionPreset));
+        OnPropertyChanged(nameof(OverlayRenderMode));
+        OnPropertyChanged(nameof(RecordingCompatibilityMode));
+        OnPropertyChanged(nameof(OverlayClickThrough));
         OnPropertyChanged(nameof(ProviderHint));
         OnPropertyChanged(nameof(ApiKeyStatusText));
         OnPropertyChanged(nameof(AutoTranslateButtonLabel));
@@ -348,7 +483,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             EncryptedDeepLApiKey = _appSettingsService.EncryptApiKey(_deepLApiKey),
             UseDeepLFreeApi = _useDeepLFreeApi,
             AutoTranslateEnabled = _isAutoTranslateEnabled,
-            AutoTranslateIntervalMs = _autoTranslateIntervalMs
+            AutoTranslateIntervalMs = _autoTranslateIntervalMs,
+            OverlayFontSize = _overlayFontSize,
+            OverlayOpacity = _overlayOpacity,
+            OverlayBackgroundOpacity = _overlayBackgroundOpacity,
+            OverlayMaxWidth = _overlayMaxWidth,
+            OverlayPositionPreset = _overlayPositionPreset,
+            OverlayRenderMode = _overlayRenderMode,
+            OverlayClickThrough = _overlayClickThrough
         };
         await _appSettingsService.SaveAsync(settings);
     }
@@ -377,6 +519,39 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             IsAutoTranslateEnabled = true;
             StartAutoTranslate();
         }
+    }
+
+    private void ToggleFocusMode()
+    {
+        IsFocusMode = !IsFocusMode;
+    }
+
+    private async Task ShowOverlayAsync()
+    {
+        var textToShow = string.IsNullOrWhiteSpace(TranslatedText) 
+            ? "Cortex Transl Overlay\n(Translation will appear here)" 
+            : TranslatedText;
+
+        await _overlayService.ShowTextAsync(textToShow, SelectedRegion, CreateOverlaySettings());
+        StatusMessage = "Overlay preview shown.";
+    }
+
+    private void HideOverlay()
+    {
+        _overlayService.Hide();
+        StatusMessage = "Overlay hidden.";
+    }
+
+    private OverlaySettings CreateOverlaySettings()
+    {
+        return new OverlaySettings(
+            OverlayFontSize,
+            OverlayOpacity,
+            OverlayBackgroundOpacity,
+            OverlayMaxWidth,
+            OverlayPositionPreset,
+            OverlayRenderMode,
+            OverlayClickThrough);
     }
 
     private void StartAutoTranslate()
@@ -423,7 +598,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateAutoTranslateStatus()
     {
-        var statusText = IsAutoTranslateEnabled ? "Auto Translate: Running ●" : "Auto Translate: Stopped";
+        var statusText = IsAutoTranslateEnabled ? "Auto Translate: Running" : "Auto Translate: Stopped";
         AutoTranslateStatusText = statusText;
         SetStatus(IsAutoTranslateEnabled ? "Auto Translate: Running" : "Auto Translate: Stopped");
     }
@@ -476,24 +651,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 overlayElapsed = await _overlayService.ShowTextAsync(
                     result.TranslatedText,
                     SelectedRegion,
-                    OverlayFontSize,
-                    OverlayOpacity);
+                    CreateOverlaySettings());
 
                 var overlayTiming = new TimingEntry("overlay update", overlayElapsed.Value);
                 LastTimings.Add(overlayTiming);
                 await _timingLogger.LogAsync("overlay-update", [overlayTiming], cancellationToken);
             }
-            else
-            {
-                _overlayService.Hide();
-            }
-
             UpdateDebugMetrics(result, overlayElapsed);
             StatusMessage = result.Status;
 
             // Refresh the auto translate status pill after each run
             if (IsAutoTranslateEnabled)
-                AutoTranslateStatusText = "Auto Translate: Running ●";
+                AutoTranslateStatusText = "Auto Translate: Running";
         }
         catch (Exception ex)
         {
@@ -660,3 +829,4 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _translationLock.Dispose();
     }
 }
+
