@@ -45,6 +45,8 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="120" />
@@ -83,14 +85,27 @@
                                       SelectedValuePath="Id"
                                       SelectedValue="{Binding TranslationProvider, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Font size" VerticalAlignment="Center" Margin="0,0,8,8" />
-                            <DockPanel Grid.Row="4" Grid.Column="1" Margin="0,0,0,8">
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="API key" VerticalAlignment="Center" Margin="0,0,8,8" />
+                            <TextBox Grid.Row="4" Grid.Column="1"
+                                     AutomationProperties.AutomationId="DeepLApiKey"
+                                     Text="{Binding DeepLApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Margin="0,0,0,8" />
+
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="API type" VerticalAlignment="Center" Margin="0,0,8,8" />
+                            <CheckBox Grid.Row="5" Grid.Column="1"
+                                      Content="DeepL Free"
+                                      IsChecked="{Binding UseDeepLFreeApi, Mode=TwoWay}"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,0,8" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Font size" VerticalAlignment="Center" Margin="0,0,8,8" />
+                            <DockPanel Grid.Row="6" Grid.Column="1" Margin="0,0,0,8">
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding OverlayFontSize, StringFormat={}{0:0}}" Width="34" TextAlignment="Right" VerticalAlignment="Center" />
                                 <Slider Minimum="18" Maximum="56" TickFrequency="2" IsSnapToTickEnabled="True" Value="{Binding OverlayFontSize, Mode=TwoWay}" />
                             </DockPanel>
 
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Opacity" VerticalAlignment="Center" Margin="0,0,8,0" />
-                            <DockPanel Grid.Row="5" Grid.Column="1">
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Opacity" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <DockPanel Grid.Row="7" Grid.Column="1">
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding OverlayOpacity, StringFormat={}{0:P0}}" Width="44" TextAlignment="Right" VerticalAlignment="Center" />
                                 <Slider Minimum="0.35" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding OverlayOpacity, Mode=TwoWay}" />
                             </DockPanel>

@@ -18,8 +18,9 @@ public sealed class WindowsOcrEngine : IOcrEngine
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        using var resized = ResizeIfNeeded(bitmap);
-        var bitmapForOcr = resized ?? bitmap;
+        using var preprocessed = OcrImagePreprocessor.Preprocess(bitmap);
+        using var resized = ResizeIfNeeded(preprocessed);
+        var bitmapForOcr = resized ?? preprocessed;
         using var softwareBitmap = await ToSoftwareBitmapAsync(bitmapForOcr, cancellationToken);
 
         var engine = CreateEngine(sourceLanguage);

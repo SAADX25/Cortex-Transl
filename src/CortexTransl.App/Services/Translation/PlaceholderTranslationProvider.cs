@@ -4,22 +4,27 @@ public sealed class PlaceholderTranslationProvider : ITranslationProvider
 {
     private static readonly Dictionary<string, string> DemoTranslations = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["hello"] = "مرحبا",
-        ["hello."] = "مرحبا.",
-        ["yes"] = "نعم",
-        ["no"] = "لا",
-        ["continue"] = "استمر",
-        ["start"] = "ابدأ",
-        ["save"] = "حفظ",
-        ["load"] = "تحميل",
-        ["game over"] = "انتهت اللعبة",
-        ["thank you"] = "شكرا لك",
-        ["where are we?"] = "أين نحن؟"
+        ["hello"] = "\u0645\u0631\u062d\u0628\u0627",
+        ["hello."] = "\u0645\u0631\u062d\u0628\u0627.",
+        ["yes"] = "\u0646\u0639\u0645",
+        ["no"] = "\u0644\u0627",
+        ["continue"] = "\u0627\u0633\u062a\u0645\u0631",
+        ["start"] = "\u0627\u0628\u062f\u0623",
+        ["save"] = "\u062d\u0641\u0638",
+        ["load"] = "\u062a\u062d\u0645\u064a\u0644",
+        ["game over"] = "\u0627\u0646\u062a\u0647\u062a \u0627\u0644\u0644\u0639\u0628\u0629",
+        ["thank you"] = "\u0634\u0643\u0631\u0627 \u0644\u0643",
+        ["where are we?"] = "\u0623\u064a\u0646 \u0646\u062d\u0646\u061f"
     };
 
     public string Id => "placeholder";
 
     public string DisplayName => "Placeholder";
+
+    public string GetStatus()
+    {
+        return "Placeholder ready";
+    }
 
     public Task<string> TranslateAsync(
         string text,
@@ -41,7 +46,7 @@ public sealed class PlaceholderTranslationProvider : ITranslationProvider
         }
 
         var placeholder = targetLanguage.Equals("ar", StringComparison.OrdinalIgnoreCase)
-            ? $"ترجمة تجريبية: {text}"
+            ? $"\u062a\u0631\u062c\u0645\u0629 \u062a\u062c\u0631\u064a\u0628\u064a\u0629: {text}"
             : $"Placeholder translation: {text}";
 
         return Task.FromResult(placeholder);

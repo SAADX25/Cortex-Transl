@@ -3,6 +3,7 @@ using CortexTransl.App.Models;
 using CortexTransl.App.Services.Capture;
 using CortexTransl.App.Services.Overlay;
 using CortexTransl.App.Services.Profiles;
+using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
 using System.Collections.ObjectModel;
 
@@ -15,6 +16,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly CaptureTranslatePipeline _pipeline;
     private readonly IOverlayService _overlayService;
     private readonly IGameProfileRepository _profileRepository;
+    private readonly TranslationProviderSettings _translationProviderSettings;
     private readonly TimingLogger _timingLogger;
 
     private CaptureRegion _selectedRegion = CaptureRegion.Empty;
@@ -28,6 +30,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _translatedText = string.Empty;
     private string _statusMessage = "Ready. Select a dialogue region to begin.";
     private string _profileName = string.Empty;
+    private string _deepLApiKey;
+    private bool _useDeepLFreeApi = true;
     private GameProfile? _selectedProfile;
 
     public MainViewModel(
@@ -36,6 +40,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         CaptureTranslatePipeline pipeline,
         IOverlayService overlayService,
         IGameProfileRepository profileRepository,
+        TranslationProviderSettings translationProviderSettings,
         TimingLogger timingLogger)
     {
         _databaseMigrator = databaseMigrator;
@@ -43,7 +48,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _pipeline = pipeline;
         _overlayService = overlayService;
         _profileRepository = profileRepository;
+        _translationProviderSettings = translationProviderSettings;
         _timingLogger = timingLogger;
+        _deepLApiKey = translationProviderSettings.DeepLApiKey;
+        _useDeepLFreeApi = translationProviderSettings.UseDeepLFreeApi;
 
         SelectRegionCommand = new AsyncRelayCommand(_ => SelectRegionAsync());
         CaptureAndTranslateCommand = new AsyncRelayCommand(_ => CaptureAndTranslateAsync());
@@ -76,7 +84,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<OptionItem> TranslationProviderOptions { get; } =
     [
-        new("placeholder", "Placeholder")
+        new("placeholder", "Placeholder"),
+        new("deepl", "DeepL")
     ];
 
     public ObservableCollection<GameProfile> Profiles { get; } = [];
@@ -129,7 +138,39 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string TranslationProvider
     {
         get => _translationProvider;
-        set => SetProperty(ref _translationProvider, value);
+        set
+        {
+            if (SetProperty(ref _translationProvider, value))
+            {
+                ResetDebugMetrics();
+            }
+        }
+    }
+
+    public string DeepLApiKey
+    {
+        get => _deepLApiKey;
+        set
+        {
+            if (SetProperty(ref _deepLApiKey, value))
+            {
+                _translationProviderSettings.DeepLApiKey = value;
+                ResetDebugMetrics();
+            }
+        }
+    }
+
+    public bool UseDeepLFreeApi
+    {
+        get => _useDeepLFreeApi;
+        set
+        {
+            if (SetProperty(ref _useDeepLFreeApi, value))
+            {
+                _translationProviderSettings.UseDeepLFreeApi = value;
+                ResetDebugMetrics();
+            }
+        }
     }
 
     public double OverlayFontSize
@@ -203,6 +244,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         try
         {
             StatusMessage = "Capturing selected region...";
+            _translationProviderSettings.DeepLApiKey = DeepLApiKey;
+            _translationProviderSettings.UseDeepLFreeApi = UseDeepLFreeApi;
 
             var settings = new PipelineSettings(SourceLanguage, TargetLanguage, OcrEngine, TranslationProvider);
             var result = await _pipeline.RunAsync(SelectedRegion, settings, cancellationToken);
@@ -332,6 +375,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         DebugMetrics.Add(new DebugMetric("Capture", FormatTiming(result.Timings, "capture")));
         DebugMetrics.Add(new DebugMetric("OCR", FormatFirstTiming(result.Timings, "ocr", "ocr skipped")));
         DebugMetrics.Add(new DebugMetric("Cache", result.CacheStatus));
+        DebugMetrics.Add(new DebugMetric("Provider", result.ProviderStatus));
         DebugMetrics.Add(new DebugMetric("Translation", FormatFirstTiming(result.Timings, "translation", "translation skipped")));
         DebugMetrics.Add(new DebugMetric("Overlay", overlayElapsed is null ? "not shown" : $"{overlayElapsed.Value} ms"));
     }
@@ -342,6 +386,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         DebugMetrics.Add(new DebugMetric("Capture", "-"));
         DebugMetrics.Add(new DebugMetric("OCR", "-"));
         DebugMetrics.Add(new DebugMetric("Cache", "-"));
+        DebugMetrics.Add(new DebugMetric("Provider", CurrentProviderStatus()));
         DebugMetrics.Add(new DebugMetric("Translation", "-"));
         DebugMetrics.Add(new DebugMetric("Overlay", "-"));
     }
@@ -363,6 +408,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         var timing = timings.FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         return timing is null ? "-" : $"{timing.ElapsedMilliseconds} ms";
+    }
+
+    private string CurrentProviderStatus()
+    {
+        if (TranslationProvider.Equals("deepl", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.IsNullOrWhiteSpace(DeepLApiKey)
+                ? "DeepL missing API key"
+                : "DeepL ready";
+        }
+
+        return "Placeholder ready";
     }
 
     public void Dispose()

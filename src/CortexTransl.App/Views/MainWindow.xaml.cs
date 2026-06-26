@@ -28,10 +28,14 @@ public partial class MainWindow : Window
         var timingLogger = new TimingLogger(paths.LogPath);
         var cacheRepository = new SqliteTranslationCacheRepository(connectionFactory);
         var profileRepository = new SqliteGameProfileRepository(connectionFactory);
+        var translationProviderSettings = new TranslationProviderSettings();
         var pipeline = new CaptureTranslatePipeline(
             new ScreenCaptureService(),
             [new WindowsOcrEngine()],
-            [new PlaceholderTranslationProvider()],
+            [
+                new PlaceholderTranslationProvider(),
+                new DeepLTranslationProvider(translationProviderSettings)
+            ],
             cacheRepository,
             timingLogger);
 
@@ -41,6 +45,7 @@ public partial class MainWindow : Window
             pipeline,
             new OverlayService(),
             profileRepository,
+            translationProviderSettings,
             timingLogger);
 
         DataContext = _viewModel;

@@ -82,12 +82,14 @@ public sealed class CaptureTranslatePipeline
                 string.Empty,
                 "OCR did not detect text. Make sure the selected region contains clear dialogue.",
                 "not checked",
+                "not checked",
                 timings,
                 cancellationToken);
         }
 
         var translationProvider = ResolveTranslationProvider(settings.TranslationProvider);
         var translationKey = CreateTranslationKey(normalizedText, settings, translationProvider.Id);
+        var providerStatus = translationProvider.GetStatus();
 
         if (translationKey == _lastTranslationKey && !string.IsNullOrWhiteSpace(_lastTranslatedText))
         {
@@ -101,6 +103,7 @@ public sealed class CaptureTranslatePipeline
                 _lastTranslatedText,
                 skippedStatus,
                 "skipped",
+                providerStatus,
                 timings,
                 cancellationToken);
         }
@@ -127,13 +130,33 @@ public sealed class CaptureTranslatePipeline
         {
             timings.Add(new TimingEntry("cache miss", 0));
             var translationStopwatch = Stopwatch.StartNew();
-            translatedText = await translationProvider.TranslateAsync(
-                normalizedText,
-                settings.SourceLanguage,
-                settings.TargetLanguage,
-                cancellationToken);
-            translationStopwatch.Stop();
-            timings.Add(new TimingEntry("translation", translationStopwatch.ElapsedMilliseconds));
+            try
+            {
+                translatedText = await translationProvider.TranslateAsync(
+                    normalizedText,
+                    settings.SourceLanguage,
+                    settings.TargetLanguage,
+                    cancellationToken);
+                translationStopwatch.Stop();
+                timings.Add(new TimingEntry("translation", translationStopwatch.ElapsedMilliseconds));
+                providerStatus = translationProvider.GetStatus();
+            }
+            catch (TranslationProviderException ex)
+            {
+                translationStopwatch.Stop();
+                timings.Add(new TimingEntry("translation", translationStopwatch.ElapsedMilliseconds));
+                _lastTranslationKey = null;
+                _lastTranslatedText = string.Empty;
+
+                return await CompleteAsync(
+                    normalizedText,
+                    string.Empty,
+                    ex.Message,
+                    "miss",
+                    ex.ProviderStatus,
+                    timings,
+                    cancellationToken);
+            }
 
             if (!string.IsNullOrWhiteSpace(translatedText))
             {
@@ -161,6 +184,7 @@ public sealed class CaptureTranslatePipeline
             translatedText,
             status,
             usedCache ? "hit" : "miss",
+            usedCache ? $"{providerStatus} (cache hit)" : providerStatus,
             timings,
             cancellationToken);
     }
@@ -184,6 +208,7 @@ public sealed class CaptureTranslatePipeline
         string translatedText,
         string status,
         string cacheStatus,
+        string providerStatus,
         List<TimingEntry> timings,
         CancellationToken cancellationToken)
     {
@@ -193,6 +218,7 @@ public sealed class CaptureTranslatePipeline
             translatedText,
             status,
             cacheStatus,
+            providerStatus,
             timings.ToArray()
         );
 

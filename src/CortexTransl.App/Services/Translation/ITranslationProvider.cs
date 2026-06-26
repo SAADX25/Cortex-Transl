@@ -6,6 +6,8 @@ public interface ITranslationProvider
 
     string DisplayName { get; }
 
+    string GetStatus();
+
     Task<string> TranslateAsync(
         string text,
         string sourceLanguage,

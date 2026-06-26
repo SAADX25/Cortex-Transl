@@ -5,4 +5,5 @@ public sealed record PipelineResult(
     string TranslatedText,
     string Status,
     string CacheStatus,
+    string ProviderStatus,
     IReadOnlyList<TimingEntry> Timings);
