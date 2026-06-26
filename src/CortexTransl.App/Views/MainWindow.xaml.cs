@@ -30,6 +30,7 @@ public partial class MainWindow : Window
         var cacheRepository = new SqliteTranslationCacheRepository(connectionFactory);
         var profileRepository = new SqliteGameProfileRepository(connectionFactory);
         var appSettingsService = new AppSettingsService(paths.DataDirectory);
+        var themeService = new ThemeService();
         var translationProviderSettings = new TranslationProviderSettings();
         var pipeline = new CaptureTranslatePipeline(
             new ScreenCaptureService(),
@@ -49,6 +50,7 @@ public partial class MainWindow : Window
             profileRepository,
             translationProviderSettings,
             appSettingsService,
+            themeService,
             timingLogger);
 
         DataContext = _viewModel;

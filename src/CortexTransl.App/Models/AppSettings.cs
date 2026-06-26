@@ -10,6 +10,8 @@ public sealed class AppSettings
 
     public bool UseDeepLFreeApi { get; set; } = true;
 
+    public string Theme { get; set; } = "Light";
+
     public bool AutoTranslateEnabled { get; set; } = false;
 
     public double AutoTranslateIntervalMs { get; set; } = 700;

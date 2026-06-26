@@ -20,6 +20,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly IGameProfileRepository _profileRepository;
     private readonly TranslationProviderSettings _translationProviderSettings;
     private readonly AppSettingsService _appSettingsService;
+    private readonly ThemeService _themeService;
     private readonly TimingLogger _timingLogger;
     private readonly SemaphoreSlim _translationLock = new(1, 1);
 
@@ -28,6 +29,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _targetLanguage = "ar";
     private string _ocrEngine = "windows";
     private string _translationProvider = "placeholder";
+    private string _selectedTheme = "Light";
     private double _overlayFontSize = 32;
     private double _overlayOpacity = 1;
     private double _overlayBackgroundOpacity = 0.86;
@@ -56,6 +58,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         IGameProfileRepository profileRepository,
         TranslationProviderSettings translationProviderSettings,
         AppSettingsService appSettingsService,
+        ThemeService themeService,
         TimingLogger timingLogger)
     {
         _databaseMigrator = databaseMigrator;
@@ -65,6 +68,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _profileRepository = profileRepository;
         _translationProviderSettings = translationProviderSettings;
         _appSettingsService = appSettingsService;
+        _themeService = themeService;
         _timingLogger = timingLogger;
 
         SelectRegionCommand = new AsyncRelayCommand(_ => SelectRegionAsync());
@@ -104,6 +108,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     [
         new("placeholder", "Placeholder"),
         new("deepl", "DeepL")
+    ];
+
+    public IReadOnlyList<OptionItem> ThemeOptions { get; } =
+    [
+        new("Light", "Light"),
+        new("Dark", "Dark"),
+        new("System", "System")
     ];
 
     public IReadOnlyList<OptionItem> OverlayRenderModeOptions { get; } =
@@ -208,6 +219,20 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 _pipeline.ResetState();
                 ResetDebugMetrics();
                 OnPropertyChanged(nameof(ProviderHint));
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public string SelectedTheme
+    {
+        get => _selectedTheme;
+        set
+        {
+            var normalizedTheme = ThemeService.NormalizeTheme(value);
+            if (SetProperty(ref _selectedTheme, normalizedTheme))
+            {
+                _themeService.ApplyTheme(normalizedTheme);
                 _ = SaveSettingsAsync();
             }
         }
@@ -433,6 +458,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         var appSettings = await _appSettingsService.LoadAsync(cancellationToken);
         _translationProvider = appSettings.Provider;
+        _selectedTheme = ThemeService.NormalizeTheme(appSettings.Theme);
+        _themeService.ApplyTheme(_selectedTheme);
         _useDeepLFreeApi = appSettings.UseDeepLFreeApi;
         _isAutoTranslateEnabled = appSettings.AutoTranslateEnabled;
         _autoTranslateIntervalMs = appSettings.AutoTranslateIntervalMs;
@@ -450,6 +477,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _translationProviderSettings.UseDeepLFreeApi = _useDeepLFreeApi;
 
         OnPropertyChanged(nameof(TranslationProvider));
+        OnPropertyChanged(nameof(SelectedTheme));
         OnPropertyChanged(nameof(UseDeepLFreeApi));
         OnPropertyChanged(nameof(DeepLApiKey));
         OnPropertyChanged(nameof(IsAutoTranslateEnabled));
@@ -482,6 +510,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             Provider = _translationProvider,
             EncryptedDeepLApiKey = _appSettingsService.EncryptApiKey(_deepLApiKey),
             UseDeepLFreeApi = _useDeepLFreeApi,
+            Theme = _selectedTheme,
             AutoTranslateEnabled = _isAutoTranslateEnabled,
             AutoTranslateIntervalMs = _autoTranslateIntervalMs,
             OverlayFontSize = _overlayFontSize,

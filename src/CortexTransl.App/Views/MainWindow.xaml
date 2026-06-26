@@ -7,7 +7,7 @@
         MinWidth="960"
         MinHeight="680"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource SurfaceBrush}">
+        Background="{DynamicResource AppBackgroundBrush}">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
@@ -23,10 +23,10 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TOP HEADER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+        <!-- Top header -->
         <Border Grid.Row="0"
-                Background="White"
-                BorderBrush="{StaticResource BorderBrushSoft}"
+                Background="{DynamicResource HeaderBackgroundBrush}"
+                BorderBrush="{DynamicResource CardBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="20,12">
             <DockPanel LastChildFill="False">
@@ -36,7 +36,7 @@
                     <TextBlock Text="Cortex Transl"
                                FontSize="20"
                                FontWeight="Bold"
-                               Foreground="{StaticResource TextPrimary}" />
+                               Foreground="{DynamicResource PrimaryTextBrush}" />
                 </StackPanel>
 
                 <!-- Region + quick action buttons -->
@@ -48,7 +48,7 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="{Binding SelectedRegionDisplay}"
                                        FontSize="12"
-                                       Foreground="#1D4ED8"
+                                       Foreground="{DynamicResource StatusPillTextBrush}"
                                        VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
@@ -57,25 +57,25 @@
                             Style="{StaticResource SecondaryButton}"
                             Command="{Binding SelectRegionCommand}"
                             MinWidth="130"
-                            ToolTip="Select dialogue region (F9)" />
+                            ToolTip="F9 Select Region" />
 
                     <Button Content="Capture Once"
                             Style="{StaticResource PrimaryButton}"
                             Command="{Binding CaptureAndTranslateCommand}"
                             MinWidth="130"
-                            ToolTip="Capture and translate once (F10)" />
+                            ToolTip="F10 Capture Once" />
 
                     <!-- Start / Stop Auto Translate Header Button -->
                     <Button Command="{Binding ToggleAutoTranslateCommand}"
                             Content="{Binding AutoTranslateButtonLabel}"
                             MinWidth="160"
-                            ToolTip="Toggle Auto Translate (F8)">
+                            ToolTip="F8 Toggle Auto Translate">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsAutoTranslateEnabled}" Value="True">
-                                        <Setter Property="Background"  Value="{StaticResource DangerBrush}" />
-                                        <Setter Property="BorderBrush" Value="{StaticResource DangerBrush}" />
+                                        <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -85,7 +85,7 @@
             </DockPanel>
         </Border>
 
-        <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• MAIN BODY â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+        <!-- Main body -->
         <Grid Grid.Row="1" Margin="16,16,16,0">
             <Grid.ColumnDefinitions>
                 <!-- Left sidebar -->
@@ -95,16 +95,23 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ LEFT SIDEBAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+            <!-- Left sidebar -->
             <ScrollViewer Grid.Column="0"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
 
-                    <!-- â–Œ Card 2: Translation Setup -->
+                    <!-- Translation setup -->
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
                             <TextBlock Text="TRANSLATION SETUP" Style="{StaticResource SectionTitle}" />
+
+                            <TextBlock Text="Theme" Style="{StaticResource InputLabel}" />
+                            <ComboBox ItemsSource="{Binding ThemeOptions}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding SelectedTheme, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,0,0,10" />
 
                             <TextBlock Text="Source Language" Style="{StaticResource InputLabel}" />
                             <ComboBox ItemsSource="{Binding SourceLanguageOptions}"
@@ -140,7 +147,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- â–Œ Card 3: DeepL API -->
+                    <!-- DeepL API -->
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
                             <TextBlock Text="DEEPL API" Style="{StaticResource SectionTitle}" />
@@ -149,8 +156,8 @@
                             <DockPanel Margin="0,0,0,4">
                                 <Button DockPanel.Dock="Right"
                                         Style="{StaticResource SecondaryButton}"
-                                        Content="ðŸ‘"
-                                        Width="32"
+                                        Content="View"
+                                        Width="52"
                                         MinHeight="30"
                                         Margin="4,0,0,0"
                                         Click="ToggleApiKeyVisibility_Click"
@@ -175,7 +182,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- â–Œ Card 4: Auto Translate -->
+                    <!-- Auto Translate -->
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
                             <TextBlock Text="AUTO TRANSLATE" Style="{StaticResource SectionTitle}" />
@@ -187,10 +194,10 @@
                                        Margin="0,0,0,10">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="{StaticResource TextSecondary}" />
+                                        <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsAutoTranslateEnabled}" Value="True">
-                                                <Setter Property="Foreground" Value="#15803D" />
+                                                <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -206,7 +213,7 @@
                                            TextAlignment="Right"
                                            VerticalAlignment="Center"
                                            FontSize="12"
-                                           Foreground="{StaticResource TextSecondary}" />
+                                           Foreground="{DynamicResource SecondaryTextBrush}" />
                                 <Slider Minimum="300"
                                         Maximum="3000"
                                         TickFrequency="100"
@@ -216,7 +223,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- â–Œ Card 5: Overlay -->
+                    <!-- Overlay -->
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
                             <TextBlock Text="OVERLAY" Style="{StaticResource SectionTitle}" />
@@ -262,7 +269,7 @@
                                            TextAlignment="Right"
                                            VerticalAlignment="Center"
                                            FontSize="12"
-                                           Foreground="{StaticResource TextSecondary}" />
+                                           Foreground="{DynamicResource SecondaryTextBrush}" />
                                 <Slider Minimum="18"
                                         Maximum="56"
                                         TickFrequency="2"
@@ -278,7 +285,7 @@
                                            TextAlignment="Right"
                                            VerticalAlignment="Center"
                                            FontSize="12"
-                                           Foreground="{StaticResource TextSecondary}" />
+                                           Foreground="{DynamicResource SecondaryTextBrush}" />
                                 <Slider Minimum="360"
                                         Maximum="1400"
                                         TickFrequency="40"
@@ -294,7 +301,7 @@
                                            TextAlignment="Right"
                                            VerticalAlignment="Center"
                                            FontSize="12"
-                                           Foreground="{StaticResource TextSecondary}" />
+                                           Foreground="{DynamicResource SecondaryTextBrush}" />
                                 <Slider Minimum="0.35"
                                         Maximum="1"
                                         TickFrequency="0.05"
@@ -310,7 +317,7 @@
                                            TextAlignment="Right"
                                            VerticalAlignment="Center"
                                            FontSize="12"
-                                           Foreground="{StaticResource TextSecondary}" />
+                                           Foreground="{DynamicResource SecondaryTextBrush}" />
                                 <Slider Minimum="0.35"
                                         Maximum="1"
                                         TickFrequency="0.05"
@@ -320,9 +327,9 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- â–Œ PROFILE -->
+                    <!-- Profile -->
                     <Expander Header="PROFILE" Margin="0,0,0,10"
-                              Foreground="{StaticResource SectionHeaderBrush}"
+                              Foreground="{DynamicResource SectionHeaderBrush}"
                               FontWeight="SemiBold" FontSize="12">
                         <Border Style="{StaticResource CardBorder}" Margin="0,8,0,0">
                             <StackPanel>
@@ -354,7 +361,7 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ RIGHT MAIN AREA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+            <!-- Right main area -->
             <ScrollViewer Grid.Column="2" 
                           VerticalScrollBarVisibility="Auto" 
                           HorizontalScrollBarVisibility="Disabled">
@@ -382,17 +389,17 @@
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Border Background="#F1F5F9" 
+                                        <Border Background="{DynamicResource DebugMetricBackgroundBrush}" 
                                                 CornerRadius="4" 
                                                 Padding="8,4" 
                                                 Margin="0,0,8,8">
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="{Binding Name}" 
-                                                           Foreground="{StaticResource LabelBrush}" 
+                                                           Foreground="{DynamicResource LabelBrush}" 
                                                            FontSize="11" 
                                                            Margin="0,0,4,0"/>
                                                 <TextBlock Text="{Binding Value}" 
-                                                           Foreground="{StaticResource TextPrimary}" 
+                                                           Foreground="{DynamicResource PrimaryTextBrush}" 
                                                            FontSize="11" 
                                                            FontWeight="SemiBold"/>
                                             </StackPanel>
@@ -406,13 +413,13 @@
                     <!-- Live Translation Preview Card -->
                     <Border Style="{StaticResource CardBorder}">
                         <StackPanel>
-                            <TextBlock Text="LIVE TRANSLATION PREVIEW" Style="{StaticResource SectionTitle}" Foreground="#15803D" />
+                            <TextBlock Text="LIVE TRANSLATION PREVIEW" Style="{StaticResource SectionTitle}" Foreground="{DynamicResource SuccessBrush}" />
                             
                             <Border Style="{StaticResource TextPanel}">
                                 <Grid MinHeight="80" MaxHeight="250">
                                     <TextBlock Text="Translation will appear here."
                                                FontSize="16"
-                                               Foreground="{StaticResource TextMuted}"
+                                               Foreground="{DynamicResource MutedTextBrush}"
                                                HorizontalAlignment="Center"
                                                VerticalAlignment="Center">
                                         <TextBlock.Style>
@@ -441,13 +448,8 @@
                                                  BorderThickness="0"
                                                  Background="Transparent"
                                                  FlowDirection="RightToLeft"
-                                                 TextAlignment="Right">
-                                            <TextBox.Style>
-                                                <Style TargetType="TextBox">
-                                                    <Setter Property="VerticalContentAlignment" Value="Top" />
-                                                </Style>
-                                            </TextBox.Style>
-                                        </TextBox>
+                                                 TextAlignment="Right"
+                                                 VerticalContentAlignment="Top" />
                                     </ScrollViewer>
                                 </Grid>
                             </Border>
@@ -457,7 +459,7 @@
                     <!-- Detected Original Text (Collapsible) -->
                     <Expander Header="DETECTED ORIGINAL TEXT" 
                               IsExpanded="True"
-                              Foreground="{StaticResource SectionHeaderBrush}"
+                              Foreground="{DynamicResource SectionHeaderBrush}"
                               FontWeight="SemiBold" FontSize="12"
                               Margin="0,0,0,16">
                         <Border Style="{StaticResource CardBorder}" Margin="0,8,0,0">
@@ -473,20 +475,10 @@
                                                  FontSize="13"
                                                  BorderThickness="0"
                                                  Background="Transparent"
-                                                 Foreground="{StaticResource TextSecondary}">
-                                            <TextBox.Style>
-                                                <Style TargetType="TextBox">
-                                                    <Setter Property="VerticalContentAlignment" Value="Top" />
-                                                </Style>
-                                            </TextBox.Style>
-                                        </TextBox>
+                                                 Foreground="{DynamicResource SecondaryTextBrush}"
+                                                 VerticalContentAlignment="Top" />
                                     </ScrollViewer>
                                 </Border>
-                                
-                                <!-- Copy button for Original Text -->
-                                <!-- The user requested "Copy button". A simple visual button or binding to clipboard. 
-                                     Since there is no ViewModel command explicitly requested for clipboard, I can leave the button UI as requested. 
-                                     However, users can highlight and copy from the TextBox anyway. -->
                             </StackPanel>
                         </Border>
                     </Expander>
@@ -495,26 +487,26 @@
             </ScrollViewer>
         </Grid>
 
-        <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• FOOTER STATUS BAR â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+        <!-- Footer status bar -->
         <Border Grid.Row="2"
-                Background="White"
-                BorderBrush="{StaticResource BorderBrushSoft}"
+                Background="{DynamicResource FooterBackgroundBrush}"
+                BorderBrush="{DynamicResource CardBorderBrush}"
                 BorderThickness="0,1,0,0"
                 Padding="20,10">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Right"
                            VerticalAlignment="Center"
                            Margin="0,0,0,0">
-                    <Run Text="F8" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
-                    <Run Text=" Toggle Auto    " Foreground="{StaticResource TextMuted}" FontSize="12" />
-                    <Run Text="F9" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
-                    <Run Text=" Select Region    " Foreground="{StaticResource TextMuted}" FontSize="12" />
-                    <Run Text="F10" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" />
-                    <Run Text=" Capture Once" Foreground="{StaticResource TextMuted}" FontSize="12" />
+                    <Run Text="F8" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+                    <Run Text=" Toggle Auto    " Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
+                    <Run Text="F9" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+                    <Run Text=" Select Region    " Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
+                    <Run Text="F10" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+                    <Run Text=" Capture Once" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
                 </TextBlock>
                 <TextBlock AutomationProperties.AutomationId="StatusMessage"
                            Text="{Binding StatusMessage}"
-                           Foreground="{StaticResource TextSecondary}"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="13"
                            FontWeight="Medium"
                            VerticalAlignment="Center"
@@ -523,4 +515,5 @@
         </Border>
     </Grid>
 </Window>
+
 

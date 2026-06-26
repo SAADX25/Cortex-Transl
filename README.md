@@ -126,6 +126,12 @@ The runtime database is stored under `%LOCALAPPDATA%\Cortex Transl\cortex-transl
 
 For DeepL testing, set `CORTEX_TRANSL_DEEPL_API_KEY` before launch or paste the key into the app. Keep the Placeholder provider selected for offline testing.
 
+## Keyboard Shortcuts
+
+- `F8` toggles Auto Translate on or off.
+- `F9` opens Select Region.
+- `F10` runs Capture Once.
+
 ## Overlay Troubleshooting
 
 If NVIDIA recording or ShadowPlay makes the overlay flicker, enable Recording Compatibility Mode in the Overlay settings. If the overlay is missing from the recording, try recording the desktop instead of game-only capture, switch the game to borderless window mode, or change the recorder capture mode.

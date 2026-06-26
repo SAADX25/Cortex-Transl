@@ -1,0 +1,38 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0B1120" />
+    <SolidColorBrush x:Key="CardBackgroundBrush" Color="#111827" />
+    <SolidColorBrush x:Key="CardBorderBrush" Color="#263244" />
+    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#E5E7EB" />
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="MutedTextBrush" Color="#94A3B8" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#3B82F6" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#60A5FA" />
+    <SolidColorBrush x:Key="AccentPressedBrush" Color="#2563EB" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#EF4444" />
+    <SolidColorBrush x:Key="DangerHoverBrush" Color="#F87171" />
+    <SolidColorBrush x:Key="DangerPressedBrush" Color="#DC2626" />
+    <SolidColorBrush x:Key="InputBackgroundBrush" Color="#0F172A" />
+    <SolidColorBrush x:Key="InputBorderBrush" Color="#334155" />
+    <SolidColorBrush x:Key="InputForegroundBrush" Color="#E5E7EB" />
+    <SolidColorBrush x:Key="TranslationPanelBackgroundBrush" Color="#0F172A" />
+    <SolidColorBrush x:Key="StatusPillBackgroundBrush" Color="#172554" />
+    <SolidColorBrush x:Key="StatusPillTextBrush" Color="#BFDBFE" />
+    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#111827" />
+    <SolidColorBrush x:Key="FooterBackgroundBrush" Color="#111827" />
+    <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#1E293B" />
+    <SolidColorBrush x:Key="ButtonHoverBackgroundBrush" Color="#273449" />
+    <SolidColorBrush x:Key="ButtonPressedBackgroundBrush" Color="#334155" />
+    <SolidColorBrush x:Key="DebugMetricBackgroundBrush" Color="#1E293B" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#22C55E" />
+    <SolidColorBrush x:Key="SectionHeaderBrush" Color="#93C5FD" />
+    <SolidColorBrush x:Key="LabelBrush" Color="#AAB7C7" />
+
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#0B1120" />
+    <SolidColorBrush x:Key="CardBrush" Color="#111827" />
+    <SolidColorBrush x:Key="BorderBrushSoft" Color="#263244" />
+    <SolidColorBrush x:Key="BorderBrushMedium" Color="#334155" />
+    <SolidColorBrush x:Key="TextPrimary" Color="#E5E7EB" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="TextMuted" Color="#94A3B8" />
+</ResourceDictionary>
