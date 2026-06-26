@@ -10,3 +10,4 @@ artifacts/
 .dotnet-sdk/
 .nuget/
 .dotnet-home/
+Cortex_Dev.bat
