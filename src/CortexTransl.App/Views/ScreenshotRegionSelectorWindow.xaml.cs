@@ -35,7 +35,7 @@ public partial class ScreenshotRegionSelectorWindow : Window
         var height = (int)SystemParameters.VirtualScreenHeight;
 
         var fullRegion = new CaptureRegion(left, top, width, height);
-        
+
         using var bitmap = await _screenCaptureService.CaptureAsync(fullRegion);
         using var memory = new MemoryStream();
         bitmap.Save(memory, ImageFormat.Bmp);

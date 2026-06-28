@@ -1,52 +1,80 @@
-<h1 align="center">Cortex Transl</h1>
+# Cortex Transl
 
-<p align="center">
-  <strong>A smart, simple, and safe real-time screen translation assistant.</strong>
-</p>
+**Cortex Transl** is a Windows desktop application for real-time screen translation. It is designed for games, visual novels, videos, and dense in-game UI panels where text appears on screen.
 
----
+The app is screen-capture based only. It does not inject into games, hook game processes, click game UI, automate gameplay, or interact with the game.
 
-## 🌟 Overview
+## Translation Modes
 
-**Cortex Transl** is a Windows desktop application designed to translate dialogue from offline, single-player story games, visual novels, and videos in real-time. It acts as a smart gaming assistant that brings language accessibility to your favorite media without complicated setups or technical jargon.
+### Subtitle Mode
 
-## ✨ Key Features
+Subtitle Mode is the default mode. It is best for:
 
-- **Smart and Simple:** No need to understand OCR engines, cache debugging, or overlay render modes. The app guides you through a setup wizard and uses smart defaults based on what you are trying to translate.
-- **Safe and Secure:** Cortex Transl does not use DLL injection, DirectX hooks, or game process hooks. It will not bypass anti-cheat systems. It operates purely on screen capture.
-- **Setup Wizard:** First-time users are guided through selecting their usage type (Game, Visual Novel, Video, or Fullscreen Game), their translation provider, and selecting a region.
-- **Simple Mode vs Advanced Mode:** 
-  - **Simple Mode:** Focuses on what matters: selecting regions, starting translation, choosing translation quality, and adjusting basic overlay settings.
-  - **Advanced Mode:** Unlocks OCR engine selection, advanced render modes, click-through overlay toggles, profile management, and detailed debug metrics.
-- **Smart Region Selection:** The app automatically selects the best way to capture your screen depending on your chosen Usage Type (e.g., using a Screenshot Selector for exclusive fullscreen games).
-- **Subtitles-like Overlay:** By default, the overlay acts like a locked subtitle bar at the bottom center of your screen, appearing and disappearing smoothly as translations run or stop.
-- **DeepL Support:** Uses DeepL for high-quality translations (requires an API key).
+- Dialogue
+- Cutscenes
+- Visual novels
+- Videos
+- Repeating subtitle areas
 
-## 🚀 Quick Start
+In this mode, Cortex Transl captures the selected dialogue region, translates the detected text, and shows the result in a stable subtitle-style overlay.
 
-1. **Launch the App:** Run Cortex Transl. The first time you launch it, a friendly Setup Wizard will help you configure the basics.
-2. **Select Your Target:** Choose whether you're translating a Windowed Game, a Visual Novel, or a Fullscreen Game.
-3. **Select Region (`F9`):** Draw a rectangle around the area where dialogue usually appears.
-4. **Auto Translate (`F8`):** Press `F8` to start auto-translating. The app will capture the region and display translations on a transparent overlay at the bottom of your screen. 
-5. **Stop Translating (`F8`):** Press `F8` again to hide the subtitles and stop the translation engine.
+### Menu / Screen Mode
 
-> **💡 Pro Tip:** For the best experience, we strongly recommend running your games in **Borderless Windowed** mode. This allows the transparent overlay to render smoothly on top of your game and ensures reliable live region selection.
+Menu / Screen Mode is designed for dense game UI text, including:
 
-## ⌨️ Keyboard Shortcuts
+- Settings windows
+- Inventory panels
+- Quest logs
+- Skill descriptions
+- Option menus
+- MMORPG interface panels
+
+In this mode, Cortex Transl reads the whole selected region, detects multiple OCR lines, translates the lines together in a batch, and shows a structured side-by-side result with original text and Arabic translations.
+
+## Features
+
+- **Screen-capture only:** No DLL injection, DirectX hooks, process hooks, anti-cheat bypassing, game UI clicking, or gameplay automation.
+- **Simple Mode:** Translation mode, theme, provider status, region selection, and the right action for the current mode.
+- **Advanced Mode:** OCR preset, language/provider controls, overlay settings, profiles, timing metrics, and debug details.
+- **Small Text OCR Presets:** Normal, Small Text, and High Contrast Text preprocessing for tiny or low-contrast UI text.
+- **Batch Menu Translation:** Menu lines are sent together when possible instead of one request per line.
+- **Line Cache:** Repeated menu text can load from cache instead of being translated again.
+- **DeepL Support:** Uses a user-provided DeepL API key, stored locally with Windows DPAPI encryption.
+- **Dark First Launch:** New installs start in Dark mode. Saved user theme choices are respected.
+
+## Quick Start
+
+### Subtitle Mode
+
+1. Choose **Subtitle Mode**.
+2. Press `F9` and select the dialogue/subtitle area.
+3. Press `F8` to start auto translation.
+4. Press `F8` again to stop auto translation and hide the overlay.
+
+### Menu / Screen Mode
+
+1. Choose **Menu / Screen Mode**.
+2. Press `F9` and select the whole game menu or panel.
+3. Press `F10` or **Translate Screen Region**.
+4. Read the translated menu lines in the result panel.
+
+For the best overlay experience in Subtitle Mode, run games in borderless windowed mode when possible.
+
+## Keyboard Shortcuts
 
 | Shortcut | Action |
-|----------|--------|
-| `F8` | Toggle Auto Translate On / Off |
-| `F9` | Open Region Selector |
-| `F10` | Run Capture Once (Single frame translation) |
+| --- | --- |
+| `F8` | Toggle Auto Translate in Subtitle Mode |
+| `F9` | Select Region |
+| `F10` | Capture Once / Translate Region |
 
-## 🛠️ Requirements & Setup
+## Requirements
 
-- **OS:** Windows 10 or Windows 11
-- **Runtime:** .NET 10 Runtime (or newer)
-- **DeepL API Key:** To use DeepL translations, you must provide your own API key in the app's settings. Your key is securely encrypted using Windows DPAPI before being saved to your local machine.
+- Windows 10 or Windows 11
+- .NET 10 Runtime or newer
+- DeepL API key for DeepL translations
 
-### Building from Source
+## Building From Source
 
 Install the .NET 10 SDK or newer, then run:
 
@@ -57,17 +85,30 @@ dotnet restore
 dotnet build
 ```
 
-Double-click `Cortex_Dev.bat` from the repository root to restore, build Debug, and run the app.
+From this repository, you can also run:
 
-## ⚠️ Troubleshooting
+```powershell
+.\Cortex_Dev.bat
+```
 
-**The overlay is flickering or invisible during recording!**
-If NVIDIA ShadowPlay or OBS is making the overlay flicker, enable **Recording Compatibility Mode** in the Overlay settings. Alternatively, capture your entire desktop instead of a specific game window.
+The development script restores packages, builds Debug, and starts the app.
 
-**The app can't select a region in my game!**
-If your game forces exclusive fullscreen, make sure to select "Fullscreen Game" in the setup wizard or usage type. The app will automatically switch to "Screenshot Selector" mode to help you safely select a region without minimizing your game.
+## Troubleshooting
 
----
-<p align="center">
-  <i>Built to make games accessible to everyone.</i>
-</p>
+### The Overlay Flickers Or Does Not Appear During Recording
+
+Use **Recording Compatibility Mode** in Advanced Mode overlay settings. If needed, capture the entire desktop instead of a specific game window.
+
+### Region Selection Does Not Work In A Game
+
+If the game uses exclusive fullscreen, choose **Fullscreen Game** in the setup wizard or use **Menu / Screen Mode**. Cortex Transl will use screenshot-based region selection for those scenarios.
+
+### Small Menu Text Is Missed
+
+Switch to **Menu / Screen Mode** and use the **Small Text** or **High Contrast Text** OCR preset in Advanced Mode.
+
+## Privacy And Safety
+
+Cortex Transl is screen-capture based only and does not interact with the game.
+
+DeepL API keys are stored locally and encrypted with Windows DPAPI.

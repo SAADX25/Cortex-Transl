@@ -41,6 +41,16 @@
                             Click="RunSetupWizard_Click"
                             Margin="15,0,0,0"
                             Padding="10,2" />
+
+                    <Button Content="Simple"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="SimpleMode_Click"
+                            Padding="10,2" />
+
+                    <Button Content="Advanced"
+                            Style="{StaticResource SecondaryButton}"
+                            Click="AdvancedMode_Click"
+                            Padding="10,2" />
                 </StackPanel>
 
                 <!-- Region + quick action buttons -->
@@ -52,11 +62,11 @@
                             MinWidth="130"
                             ToolTip="F9 Select Region" />
 
-                    <Button Content="Capture Once"
+                    <Button Content="{Binding CaptureButtonLabel}"
                             Style="{StaticResource PrimaryButton}"
                             Command="{Binding CaptureAndTranslateCommand}"
                             MinWidth="130"
-                            ToolTip="F10 Capture Once" />
+                            ToolTip="F10 Capture Once / Translate Region" />
 
                     <!-- Start / Stop Auto Translate Header Button -->
                     <Button Command="{Binding ToggleAutoTranslateCommand}"
@@ -65,10 +75,14 @@
                             ToolTip="F8 Toggle Auto Translate">
                         <Button.Style>
                             <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+                                <Setter Property="Visibility" Value="Visible" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsAutoTranslateEnabled}" Value="True">
                                         <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
                                         <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsSubtitleMode}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -99,6 +113,13 @@
                         <StackPanel>
                             <TextBlock Text="TRANSLATION SETUP" Style="{StaticResource SectionTitle}" />
 
+                            <TextBlock Text="Translation Mode" Style="{StaticResource InputLabel}" />
+                            <ComboBox ItemsSource="{Binding TranslationModeOptions}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding TranslationMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,0,0,10" />
+
                             <TextBlock Text="Theme" Style="{StaticResource InputLabel}" />
                             <ComboBox ItemsSource="{Binding ThemeOptions}"
                                       DisplayMemberPath="Name"
@@ -106,26 +127,28 @@
                                       SelectedValue="{Binding SelectedTheme, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                       Margin="0,0,0,10" />
 
-                            <TextBlock Text="Translation Quality" Style="{StaticResource InputLabel}" />
-                            <ComboBox ItemsSource="{Binding TranslationQualityOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding TranslationQuality, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      Margin="0,0,0,10" />
+                            <StackPanel Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="Translation Quality" Style="{StaticResource InputLabel}" />
+                                <ComboBox ItemsSource="{Binding TranslationQualityOptions}"
+                                          DisplayMemberPath="Name"
+                                          SelectedValuePath="Id"
+                                          SelectedValue="{Binding TranslationQuality, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,0,0,10" />
 
-                            <TextBlock Text="Source Language" Style="{StaticResource InputLabel}" />
-                            <ComboBox ItemsSource="{Binding SourceLanguageOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding SourceLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      Margin="0,0,0,10" />
+                                <TextBlock Text="Source Language" Style="{StaticResource InputLabel}" />
+                                <ComboBox ItemsSource="{Binding SourceLanguageOptions}"
+                                          DisplayMemberPath="Name"
+                                          SelectedValuePath="Id"
+                                          SelectedValue="{Binding SourceLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,0,0,10" />
 
-                            <TextBlock Text="Target Language" Style="{StaticResource InputLabel}" />
-                            <ComboBox ItemsSource="{Binding TargetLanguageOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding TargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      Margin="0,0,0,10" />
+                                <TextBlock Text="Target Language" Style="{StaticResource InputLabel}" />
+                                <ComboBox ItemsSource="{Binding TargetLanguageOptions}"
+                                          DisplayMemberPath="Name"
+                                          SelectedValuePath="Id"
+                                          SelectedValue="{Binding TargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,0,0,10" />
+                            </StackPanel>
 
                             <StackPanel Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
                                 <TextBlock Text="OCR Engine" Style="{StaticResource InputLabel}" />
@@ -133,6 +156,13 @@
                                           DisplayMemberPath="Name"
                                           SelectedValuePath="Id"
                                           SelectedValue="{Binding OcrEngine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          Margin="0,0,0,10" />
+
+                                <TextBlock Text="OCR Preset" Style="{StaticResource InputLabel}" />
+                                <ComboBox ItemsSource="{Binding OcrPresetOptions}"
+                                          DisplayMemberPath="Name"
+                                          SelectedValuePath="Id"
+                                          SelectedValue="{Binding OcrPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                           Margin="0,0,0,10" />
                             </StackPanel>
 
@@ -146,11 +176,48 @@
                             <TextBlock Text="{Binding ProviderHint}"
                                        Style="{StaticResource HintText}"
                                        Margin="0,0,0,4" />
+
+                            <TextBlock Text="{Binding ModeInstructionText}"
+                                       Style="{StaticResource HintText}"
+                                       Margin="0,8,0,10" />
+
+                            <WrapPanel Orientation="Horizontal">
+                                <Button Content="Select Region"
+                                        Command="{Binding SelectRegionCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        MinWidth="120"
+                                        ToolTip="F9 Select Region" />
+                                <Button Content="{Binding CaptureButtonLabel}"
+                                        Command="{Binding CaptureAndTranslateCommand}"
+                                        Style="{StaticResource PrimaryButton}"
+                                        MinWidth="150"
+                                        ToolTip="F10 Capture Once / Translate Region" />
+                                <Button Command="{Binding ToggleAutoTranslateCommand}"
+                                        Content="{Binding AutoTranslateButtonLabel}"
+                                        MinWidth="150"
+                                        ToolTip="F8 Toggle Auto Translate">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsAutoTranslateEnabled}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsSubtitleMode}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </WrapPanel>
                         </StackPanel>
                     </Border>
 
                     <!-- DeepL API -->
-                    <Border Style="{StaticResource CardBorder}">
+                    <Border Style="{StaticResource CardBorder}"
+                            Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <TextBlock Text="DEEPL API" Style="{StaticResource SectionTitle}" />
 
@@ -185,7 +252,7 @@
                     </Border>
 
                     <!-- Auto Translate -->
-                    <Border Style="{StaticResource CardBorder}" Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
+                    <Border Style="{StaticResource CardBorder}" Visibility="{Binding ShowSubtitleAdvancedControls, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <TextBlock Text="AUTO TRANSLATE" Style="{StaticResource SectionTitle}" />
 
@@ -226,7 +293,8 @@
                     </Border>
 
                     <!-- Overlay -->
-                    <Border Style="{StaticResource CardBorder}">
+                    <Border Style="{StaticResource CardBorder}"
+                            Visibility="{Binding ShowSubtitleAdvancedControls, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <TextBlock Text="OVERLAY" Style="{StaticResource SectionTitle}" />
                             
@@ -460,7 +528,8 @@
                     </Border>
 
                     <!-- Live Translation Preview Card -->
-                    <Border Style="{StaticResource CardBorder}">
+                    <Border Style="{StaticResource CardBorder}"
+                            Visibility="{Binding IsSubtitleMode, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,12">
                                 <Border Style="{StaticResource StatusPill}" DockPanel.Dock="Right">
@@ -513,12 +582,117 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- Menu / Screen Translation Result -->
+                    <Border Style="{StaticResource CardBorder}"
+                            Visibility="{Binding IsMenuScreenMode, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,12">
+                                <Button DockPanel.Dock="Right"
+                                        Content="Copy All"
+                                        Command="{Binding CopyMenuTranslationsCommand}"
+                                        Style="{StaticResource SecondaryButton}"
+                                        MinWidth="90" />
+                                <StackPanel>
+                                    <TextBlock Text="MENU / SCREEN TRANSLATION"
+                                               Style="{StaticResource SectionTitle}"
+                                               Foreground="{DynamicResource SuccessBrush}"
+                                               Margin="0,0,0,4" />
+                                    <TextBlock Text="{Binding MenuResultHint}"
+                                               Style="{StaticResource HintText}" />
+                                </StackPanel>
+                            </DockPanel>
+
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Original"
+                                           Style="{StaticResource InputLabel}"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Grid.Column="2"
+                                           Text="Arabic"
+                                           Style="{StaticResource InputLabel}"
+                                           FontWeight="SemiBold"
+                                           TextAlignment="Right" />
+                            </Grid>
+
+                            <Border Style="{StaticResource TextPanel}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              MaxHeight="420">
+                                    <ItemsControl ItemsSource="{Binding MenuTextBlocks}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,0,0,10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="12" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <Border Background="{DynamicResource CardBackgroundBrush}"
+                                                            BorderBrush="{DynamicResource CardBorderBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="6"
+                                                            Padding="10">
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding Text}"
+                                                                       TextWrapping="Wrap"
+                                                                       FontSize="13"
+                                                                       Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                            <TextBlock Text="{Binding BoundsDisplay}"
+                                                                       Style="{StaticResource SmallMutedText}"
+                                                                       Margin="0,6,0,0" />
+                                                        </StackPanel>
+                                                    </Border>
+
+                                                    <Border Grid.Column="2"
+                                                            Background="{DynamicResource CardBackgroundBrush}"
+                                                            BorderBrush="{DynamicResource CardBorderBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="6"
+                                                            Padding="10">
+                                                        <TextBlock Text="{Binding TranslatedText}"
+                                                                   TextWrapping="Wrap"
+                                                                   FontSize="15"
+                                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                   FlowDirection="RightToLeft"
+                                                                   TextAlignment="Right" />
+                                                    </Border>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+
+                            <Border Style="{StaticResource TextPanel}">
+                                <TextBox AutomationProperties.AutomationId="MenuTranslatedTextFallback"
+                                         AutomationProperties.Name="Menu Translated Text Fallback"
+                                         Text="{Binding TranslatedText, Mode=OneWay}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         MinHeight="70"
+                                         MaxHeight="180"
+                                         FontSize="15"
+                                         BorderThickness="0"
+                                         Background="Transparent"
+                                         FlowDirection="RightToLeft"
+                                         TextAlignment="Right"
+                                         VerticalContentAlignment="Top" />
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
                     <!-- Detected Original Text (Collapsible) -->
                     <Expander Header="DETECTED ORIGINAL TEXT" 
                               IsExpanded="True"
                               Foreground="{DynamicResource SectionHeaderBrush}"
                               FontWeight="SemiBold" FontSize="12"
-                              Margin="0,0,0,16">
+                              Margin="0,0,0,16"
+                              Visibility="{Binding IsAdvancedMode, Converter={StaticResource BoolToVis}}">
                         <Border Style="{StaticResource CardBorder}" Margin="0,8,0,0">
                             <StackPanel>
                                 <Border Style="{StaticResource TextPanel}">
@@ -559,7 +733,7 @@
                     <Run Text="F9" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
                     <Run Text=" Select Region    " Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
                     <Run Text="F10" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
-                    <Run Text=" Capture Once" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
+                    <Run Text=" Capture / Translate" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
                 </TextBlock>
                 <TextBlock AutomationProperties.AutomationId="StatusMessage"
                            Text="{Binding StatusMessage}"

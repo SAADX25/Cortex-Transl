@@ -26,10 +26,10 @@
             <ComboBox x:Name="UsageTypeComboBox"
                       Margin="0,0,0,15"
                       SelectedIndex="0">
-                <ComboBoxItem Content="Game (Windowed or Borderless)" Tag="Game" />
-                <ComboBoxItem Content="Fullscreen Game" Tag="Fullscreen Game" />
-                <ComboBoxItem Content="Video / YouTube" Tag="Video" />
+                <ComboBoxItem Content="Game Dialogue" Tag="Game Dialogue" />
                 <ComboBoxItem Content="Visual Novel" Tag="Visual Novel" />
+                <ComboBoxItem Content="Fullscreen Game" Tag="Fullscreen Game" />
+                <ComboBoxItem Content="Menu / UI Translation" Tag="Menu / UI Translation" />
             </ComboBox>
 
             <TextBlock Text="Translation Provider" Style="{StaticResource InputLabel}" />
@@ -43,7 +43,7 @@
                        Style="{StaticResource HintText}"
                        Margin="0,0,0,15" />
 
-            <TextBlock Text="We recommend 'Borderless Windowed' for games. If your game forces fullscreen, select 'Fullscreen Game' above to enable Screenshot Selection."
+            <TextBlock Text="Use Game Dialogue or Visual Novel for subtitles. Use Menu / UI Translation for settings windows, inventory panels, quests, and other dense UI text."
                        TextWrapping="Wrap"
                        Foreground="{DynamicResource SecondaryTextBrush}"
                        Margin="0,10,0,15" />

@@ -6,4 +6,5 @@ public sealed record PipelineResult(
     string Status,
     string CacheStatus,
     string ProviderStatus,
-    IReadOnlyList<TimingEntry> Timings);
+    IReadOnlyList<TimingEntry> Timings,
+    IReadOnlyList<RecognizedTextBlock> TextBlocks);

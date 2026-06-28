@@ -1,3 +1,6 @@
+using System.Net;
+using System.Text.RegularExpressions;
+
 namespace CortexTransl.App.Services.Translation;
 
 public sealed class PlaceholderTranslationProvider : ITranslationProvider
@@ -39,6 +42,11 @@ public sealed class PlaceholderTranslationProvider : ITranslationProvider
             return Task.FromResult(string.Empty);
         }
 
+        if (TryTranslateLineBatch(text, targetLanguage, out var batchTranslation))
+        {
+            return Task.FromResult(batchTranslation);
+        }
+
         if (targetLanguage.Equals("ar", StringComparison.OrdinalIgnoreCase) &&
             DemoTranslations.TryGetValue(text.Trim(), out var translated))
         {
@@ -50,5 +58,44 @@ public sealed class PlaceholderTranslationProvider : ITranslationProvider
             : $"Placeholder translation: {text}";
 
         return Task.FromResult(placeholder);
+    }
+
+    private static bool TryTranslateLineBatch(string text, string targetLanguage, out string translation)
+    {
+        var matches = Regex.Matches(
+            text,
+            """<line\s+id\s*=\s*["'](?<id>\d+)["']\s*>(?<text>.*?)</line>""",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        if (matches.Count == 0)
+        {
+            translation = string.Empty;
+            return false;
+        }
+
+        var lines = new List<string>();
+        foreach (Match match in matches)
+        {
+            var id = match.Groups["id"].Value;
+            var sourceLine = WebUtility.HtmlDecode(match.Groups["text"].Value).Trim();
+            var translatedLine = TranslateSingleLine(sourceLine, targetLanguage);
+            lines.Add($"<line id=\"{id}\">{WebUtility.HtmlEncode(translatedLine)}</line>");
+        }
+
+        translation = string.Join(Environment.NewLine, lines);
+        return true;
+    }
+
+    private static string TranslateSingleLine(string text, string targetLanguage)
+    {
+        if (targetLanguage.Equals("ar", StringComparison.OrdinalIgnoreCase) &&
+            DemoTranslations.TryGetValue(text.Trim(), out var translated))
+        {
+            return translated;
+        }
+
+        return targetLanguage.Equals("ar", StringComparison.OrdinalIgnoreCase)
+            ? $"\u062a\u0631\u062c\u0645\u0629 \u062a\u062c\u0631\u064a\u0628\u064a\u0629: {text}"
+            : $"Placeholder translation: {text}";
     }
 }

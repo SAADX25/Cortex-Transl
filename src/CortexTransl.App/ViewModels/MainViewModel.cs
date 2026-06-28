@@ -29,7 +29,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _targetLanguage = "ar";
     private string _ocrEngine = "windows";
     private string _translationProvider = "placeholder";
-    private string _selectedTheme = "Light";
+    private string _translationMode = "subtitle";
+    private string _ocrPreset = "normal";
+    private string _selectedTheme = "Dark";
     private double _overlayFontSize = 32;
     private double _overlayOpacity = 1;
     private double _overlayBackgroundOpacity = 0.86;
@@ -43,7 +45,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _overlayClickThrough = true;
     private string _originalText = string.Empty;
     private string _translatedText = string.Empty;
-    private string _statusMessage = "Ready. Select a dialogue region to begin.";
+    private string _statusMessage = "Ready. Select a region to begin.";
     private string _profileName = string.Empty;
     private string _deepLApiKey = string.Empty;
     private bool _useDeepLFreeApi = true;
@@ -55,9 +57,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _isFocusMode = false;
     private bool _overlayHiddenByUser;
     private string? _hiddenOverlayText;
+    private bool _hasRunSetupWizard;
     private string _appMode = "Simple";
-    private string _usageType = "Game";
+    private string _usageType = "Game Dialogue";
     private string _translationQuality = "Balanced";
+
+    public event EventHandler<string>? CopyTextRequested;
 
     public MainViewModel(
         DatabaseMigrator databaseMigrator,
@@ -84,12 +89,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         CaptureAndTranslateCommand = new AsyncRelayCommand(_ => CaptureAndTranslateAsync());
         SaveProfileCommand = new AsyncRelayCommand(_ => SaveProfileAsync(), _ => !SelectedRegion.IsEmpty);
         LoadSelectedProfileCommand = new RelayCommand(_ => LoadSelectedProfile(), _ => SelectedProfile is not null);
-        ToggleAutoTranslateCommand = new RelayCommand(_ => ToggleAutoTranslate());
+        ToggleAutoTranslateCommand = new RelayCommand(_ => ToggleAutoTranslate(), _ => IsSubtitleMode);
         ToggleFocusModeCommand = new RelayCommand(_ => ToggleFocusMode());
         ShowOverlayCommand = new AsyncRelayCommand(_ => ShowOverlayAsync());
         HideOverlayCommand = new RelayCommand(_ => HideOverlay());
         ClearTranslationCommand = new RelayCommand(_ => ClearTranslation());
         ToggleOverlayPositionLockCommand = new RelayCommand(_ => ToggleOverlayPositionLock());
+        CopyMenuTranslationsCommand = new RelayCommand(_ => CopyMenuTranslations(), _ => HasMenuResult);
         _overlayService.OverlayPositionChanged += OnOverlayPositionChanged;
         ResetDebugMetrics();
     }
@@ -120,6 +126,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     [
         new("placeholder", "Placeholder"),
         new("deepl", "DeepL")
+    ];
+
+    public IReadOnlyList<OptionItem> TranslationModeOptions { get; } =
+    [
+        new("subtitle", "Subtitle Mode"),
+        new("menu", "Menu / Screen Mode")
+    ];
+
+    public IReadOnlyList<OptionItem> OcrPresetOptions { get; } =
+    [
+        new("normal", "Normal"),
+        new("small-text", "Small Text"),
+        new("high-contrast", "High Contrast Text")
     ];
 
     public IReadOnlyList<OptionItem> TranslationQualityOptions { get; } =
@@ -164,6 +183,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<DebugMetric> DebugMetrics { get; } = [];
 
+    public ObservableCollection<RecognizedTextBlock> MenuTextBlocks { get; } = [];
+
     public AsyncRelayCommand SelectRegionCommand { get; }
 
     public AsyncRelayCommand CaptureAndTranslateCommand { get; }
@@ -184,6 +205,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public RelayCommand ToggleOverlayPositionLockCommand { get; }
 
+    public RelayCommand CopyMenuTranslationsCommand { get; }
+
     public bool IsFocusMode
     {
         get => _isFocusMode;
@@ -199,6 +222,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(IsSimpleMode));
                 OnPropertyChanged(nameof(IsAdvancedMode));
+                OnPropertyChanged(nameof(ShowSubtitleAdvancedControls));
                 _ = SaveSettingsAsync();
             }
         }
@@ -206,6 +230,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public bool IsSimpleMode => AppMode.Equals("Simple", StringComparison.OrdinalIgnoreCase);
     public bool IsAdvancedMode => AppMode.Equals("Advanced", StringComparison.OrdinalIgnoreCase);
+    public bool ShowSubtitleAdvancedControls => IsAdvancedMode && IsSubtitleMode;
 
     public string UsageType
     {
@@ -230,6 +255,87 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
         }
     }
+
+    public string TranslationMode
+    {
+        get => _translationMode;
+        set
+        {
+            var normalizedMode = NormalizeTranslationMode(value);
+            if (SetProperty(ref _translationMode, normalizedMode))
+            {
+                if (IsMenuScreenMode && OcrPreset.Equals("normal", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ocrPreset = "small-text";
+                    OnPropertyChanged(nameof(OcrPreset));
+                    OnPropertyChanged(nameof(OcrPresetDisplayName));
+                    ResetDebugMetrics();
+                }
+                else if (IsSubtitleMode && OcrPreset.Equals("small-text", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ocrPreset = "normal";
+                    OnPropertyChanged(nameof(OcrPreset));
+                    OnPropertyChanged(nameof(OcrPresetDisplayName));
+                    ResetDebugMetrics();
+                }
+
+                if (IsMenuScreenMode && IsAutoTranslateEnabled)
+                {
+                    IsAutoTranslateEnabled = false;
+                    StopAutoTranslate(hideOverlay: true, updateStatus: true);
+                }
+
+                _pipeline.ResetState();
+                OnPropertyChanged(nameof(IsSubtitleMode));
+                OnPropertyChanged(nameof(IsMenuScreenMode));
+                OnPropertyChanged(nameof(ShowSubtitleAdvancedControls));
+                OnPropertyChanged(nameof(CaptureButtonLabel));
+                OnPropertyChanged(nameof(AutoTranslateButtonLabel));
+                OnPropertyChanged(nameof(ModeInstructionText));
+                OnPropertyChanged(nameof(MenuResultHint));
+                ToggleAutoTranslateCommand.RaiseCanExecuteChanged();
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public bool IsSubtitleMode => TranslationMode.Equals("subtitle", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsMenuScreenMode => TranslationMode.Equals("menu", StringComparison.OrdinalIgnoreCase);
+
+    public string OcrPreset
+    {
+        get => _ocrPreset;
+        set
+        {
+            var normalizedPreset = NormalizeOcrPreset(value);
+            if (SetProperty(ref _ocrPreset, normalizedPreset))
+            {
+                _pipeline.ResetState();
+                OnPropertyChanged(nameof(OcrPresetDisplayName));
+                ResetDebugMetrics();
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public string CaptureButtonLabel => IsMenuScreenMode ? "Translate Screen Region" : "Capture Once";
+
+    public string ModeInstructionText => IsMenuScreenMode
+        ? "Select the game menu, then press Translate Screen Region."
+        : "Select the dialogue area, then start Auto Translate or capture once.";
+
+    public string MenuResultHint => HasMenuResult
+        ? MenuTextBlocks.Count > 0
+            ? $"{MenuTextBlocks.Count} detected line(s)."
+            : "Provider returned a full translated block."
+        : "Menu translations will appear here after you translate a selected screen region.";
+
+    public bool HasMenuResult => MenuTextBlocks.Count > 0 || !string.IsNullOrWhiteSpace(TranslatedText);
+
+    public string OcrPresetDisplayName => OcrPresetOptions
+        .FirstOrDefault(option => option.Id.Equals(OcrPreset, StringComparison.OrdinalIgnoreCase))
+        ?.Name ?? "Normal";
 
     public CaptureRegion SelectedRegion
     {
@@ -577,8 +683,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         await RefreshProfilesAsync(cancellationToken);
 
         var appSettings = await _appSettingsService.LoadAsync(cancellationToken);
+        _hasRunSetupWizard = appSettings.HasRunSetupWizard;
         _appMode = appSettings.AppMode;
         _usageType = appSettings.UsageType;
+        _translationMode = NormalizeTranslationMode(appSettings.TranslationMode);
+        _ocrPreset = NormalizeOcrPreset(appSettings.OcrPreset);
         _translationQuality = appSettings.TranslationQuality;
         _translationProvider = appSettings.Provider;
         _selectedTheme = ThemeService.NormalizeTheme(appSettings.Theme);
@@ -613,7 +722,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(AppMode));
         OnPropertyChanged(nameof(IsSimpleMode));
         OnPropertyChanged(nameof(IsAdvancedMode));
+        OnPropertyChanged(nameof(ShowSubtitleAdvancedControls));
         OnPropertyChanged(nameof(UsageType));
+        OnPropertyChanged(nameof(TranslationMode));
+        OnPropertyChanged(nameof(IsSubtitleMode));
+        OnPropertyChanged(nameof(IsMenuScreenMode));
+        OnPropertyChanged(nameof(OcrPreset));
+        OnPropertyChanged(nameof(OcrPresetDisplayName));
+        OnPropertyChanged(nameof(CaptureButtonLabel));
+        OnPropertyChanged(nameof(ModeInstructionText));
+        OnPropertyChanged(nameof(MenuResultHint));
         OnPropertyChanged(nameof(TranslationQuality));
         OnPropertyChanged(nameof(TranslationProvider));
         OnPropertyChanged(nameof(SelectedTheme));
@@ -636,6 +754,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ProviderHint));
         OnPropertyChanged(nameof(ApiKeyStatusText));
         OnPropertyChanged(nameof(AutoTranslateButtonLabel));
+        ToggleAutoTranslateCommand.RaiseCanExecuteChanged();
+        CopyMenuTranslationsCommand.RaiseCanExecuteChanged();
 
         ResetDebugMetrics();
         UpdateAutoTranslateStatus();
@@ -650,8 +770,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         var settings = new AppSettings
         {
+            HasRunSetupWizard = _hasRunSetupWizard,
             AppMode = _appMode,
             UsageType = _usageType,
+            TranslationMode = _translationMode,
+            OcrPreset = _ocrPreset,
             TranslationQuality = _translationQuality,
             Provider = _translationProvider,
             EncryptedDeepLApiKey = _appSettingsService.EncryptApiKey(_deepLApiKey),
@@ -676,6 +799,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void ToggleAutoTranslate()
     {
+        if (IsMenuScreenMode)
+        {
+            StatusMessage = "Auto Translate is available in Subtitle Mode. Use Translate Screen Region for menus.";
+            return;
+        }
+
         if (IsAutoTranslateEnabled)
         {
             IsAutoTranslateEnabled = false;
@@ -709,8 +838,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private async Task ShowOverlayAsync()
     {
-        var textToShow = string.IsNullOrWhiteSpace(TranslatedText) 
-            ? "Cortex Transl Overlay\n(Translation will appear here)" 
+        if (IsMenuScreenMode)
+        {
+            StatusMessage = "Menu / Screen Mode shows translations in the result panel.";
+            return;
+        }
+
+        var textToShow = string.IsNullOrWhiteSpace(TranslatedText)
+            ? "Cortex Transl Overlay\n(Translation will appear here)"
             : TranslatedText;
 
         await _overlayService.ShowTextAsync(textToShow, SelectedRegion, CreateOverlaySettings());
@@ -731,6 +866,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         OriginalText = string.Empty;
         TranslatedText = string.Empty;
+        MenuTextBlocks.Clear();
+        OnPropertyChanged(nameof(HasMenuResult));
+        OnPropertyChanged(nameof(MenuResultHint));
+        CopyMenuTranslationsCommand.RaiseCanExecuteChanged();
         _overlayService.ClearText();
         _pipeline.ResetState();
         _overlayHiddenByUser = false;
@@ -900,11 +1039,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            StatusMessage = "Capturing...";
+            StatusMessage = IsMenuScreenMode ? "Capturing menu region..." : "Capturing...";
             _translationProviderSettings.DeepLApiKey = DeepLApiKey;
             _translationProviderSettings.UseDeepLFreeApi = UseDeepLFreeApi;
 
-            var settings = new PipelineSettings(SourceLanguage, TargetLanguage, OcrEngine, TranslationProvider);
+            var settings = new PipelineSettings(
+                SourceLanguage,
+                TargetLanguage,
+                OcrEngine,
+                TranslationProvider,
+                TranslationMode,
+                OcrPreset);
             if (TranslationProvider.Equals("deepl", StringComparison.OrdinalIgnoreCase))
             {
                 StatusMessage = "Translating with DeepL...";
@@ -914,6 +1059,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
             OriginalText = result.OriginalText;
             TranslatedText = result.TranslatedText;
+            UpdateMenuBlocks(result.TextBlocks);
 
             LastTimings.Clear();
             foreach (var timing in result.Timings)
@@ -935,6 +1081,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 var overlayTiming = new TimingEntry("overlay update", overlayElapsed.Value);
                 LastTimings.Add(overlayTiming);
                 await _timingLogger.LogAsync("overlay-update", [overlayTiming], cancellationToken);
+            }
+            else if (IsMenuScreenMode)
+            {
+                _overlayService.Hide();
             }
             UpdateDebugMetrics(result, overlayElapsed);
             StatusMessage = GetUserStatusMessage(result);
@@ -958,6 +1108,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private bool ShouldShowOverlay(PipelineResult result, bool isAutoCapture, CancellationToken cancellationToken)
     {
+        if (IsMenuScreenMode)
+        {
+            return false;
+        }
+
         if (string.IsNullOrWhiteSpace(result.TranslatedText) || cancellationToken.IsCancellationRequested)
         {
             return false;
@@ -979,8 +1134,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         return true;
     }
 
-    private static string GetUserStatusMessage(PipelineResult result)
+    private string GetUserStatusMessage(PipelineResult result)
     {
+        if (IsMenuScreenMode)
+        {
+            return result.TextBlocks.Count > 0 && !string.IsNullOrWhiteSpace(result.TranslatedText)
+                ? result.Status
+                : result.Status;
+        }
+
         if (IsDuplicateSkip(result))
         {
             return "Waiting for text change.";
@@ -1007,7 +1169,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         try
         {
             var mode = RegionSelectionMode.Auto;
-            if (UsageType.Equals("Fullscreen Game", StringComparison.OrdinalIgnoreCase))
+            if (UsageType.Equals("Fullscreen Game", StringComparison.OrdinalIgnoreCase) || IsMenuScreenMode)
             {
                 mode = RegionSelectionMode.Screenshot;
             }
@@ -1024,7 +1186,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
 
             SelectedRegion = region;
-            StatusMessage = "Region selected.";
+            StatusMessage = IsMenuScreenMode
+                ? "Menu region selected. Press Translate Screen Region."
+                : "Region selected.";
             _pipeline.ResetState();
             _ = RefreshVisibleOverlayAsync();
         }
@@ -1106,6 +1270,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         DebugMetrics.Add(new DebugMetric("Provider", result.ProviderStatus));
         DebugMetrics.Add(new DebugMetric("Translation", FormatFirstTiming(result.Timings, "translation", "translation skipped")));
         DebugMetrics.Add(new DebugMetric("Overlay", overlayElapsed is null ? "not shown" : $"{overlayElapsed.Value} ms"));
+        DebugMetrics.Add(new DebugMetric("OCR Preset", OcrPresetDisplayName));
+        DebugMetrics.Add(new DebugMetric("Blocks", result.TextBlocks.Count.ToString()));
     }
 
     private void ResetDebugMetrics()
@@ -1117,6 +1283,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         DebugMetrics.Add(new DebugMetric("Provider", CurrentProviderStatus()));
         DebugMetrics.Add(new DebugMetric("Translation", "-"));
         DebugMetrics.Add(new DebugMetric("Overlay", "-"));
+        DebugMetrics.Add(new DebugMetric("OCR Preset", OcrPresetDisplayName));
+        DebugMetrics.Add(new DebugMetric("Blocks", "-"));
     }
 
     private static string FormatFirstTiming(IReadOnlyList<TimingEntry> timings, string measuredName, string skippedName)
@@ -1138,10 +1306,75 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         return timing is null ? "-" : $"{timing.ElapsedMilliseconds} ms";
     }
 
+    private void UpdateMenuBlocks(IReadOnlyList<RecognizedTextBlock> textBlocks)
+    {
+        MenuTextBlocks.Clear();
+
+        if (IsMenuScreenMode)
+        {
+            foreach (var block in textBlocks)
+            {
+                MenuTextBlocks.Add(block);
+            }
+        }
+
+        OnPropertyChanged(nameof(HasMenuResult));
+        OnPropertyChanged(nameof(MenuResultHint));
+        CopyMenuTranslationsCommand.RaiseCanExecuteChanged();
+    }
+
+    private void CopyMenuTranslations()
+    {
+        var lines = MenuTextBlocks
+            .Where(block => !string.IsNullOrWhiteSpace(block.TranslatedText))
+            .Select(block => $"{block.Text} -> {block.TranslatedText}")
+            .ToArray();
+
+        var text = lines.Length > 0
+            ? string.Join(Environment.NewLine, lines)
+            : TranslatedText;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            StatusMessage = "There are no menu translations to copy.";
+            return;
+        }
+
+        CopyTextRequested?.Invoke(this, text);
+        StatusMessage = "Menu translations copied.";
+    }
+
+    private static string NormalizeTranslationMode(string? mode)
+    {
+        return string.IsNullOrWhiteSpace(mode)
+            ? "subtitle"
+            : mode.Trim().ToLowerInvariant() switch
+            {
+                "menu" => "menu",
+                "menu-screen" => "menu",
+                "menu / screen mode" => "menu",
+                _ => "subtitle"
+            };
+    }
+
+    private static string NormalizeOcrPreset(string? preset)
+    {
+        return string.IsNullOrWhiteSpace(preset)
+            ? "normal"
+            : preset.Trim().ToLowerInvariant() switch
+            {
+                "small text" => "small-text",
+                "small-text" => "small-text",
+                "high contrast text" => "high-contrast",
+                "high-contrast" => "high-contrast",
+                _ => "normal"
+            };
+    }
+
     private string CurrentProviderStatus()
     {
         var isPlaceholder = TranslationProvider.Equals("placeholder", StringComparison.OrdinalIgnoreCase);
-        
+
         if (isPlaceholder && !string.IsNullOrWhiteSpace(DeepLApiKey))
         {
             return "Placeholder (Warning: API key entered, but Provider is Placeholder. Select DeepL to use real translation.)";

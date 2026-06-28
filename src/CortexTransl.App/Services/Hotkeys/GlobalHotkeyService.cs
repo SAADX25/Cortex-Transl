@@ -15,7 +15,7 @@ public sealed class GlobalHotkeyService : IDisposable
 {
     private const int WmHotkey = 0x0312;
     private const uint ModNoRepeat = 0x4000;
-    
+
     // We will use the virtual key as the Hotkey ID to allow multiple registrations
     private readonly HashSet<int> _registeredKeys = [];
 
@@ -40,7 +40,7 @@ public sealed class GlobalHotkeyService : IDisposable
 
         var virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
         int hotkeyId = (int)virtualKey;
-        
+
         if (_registeredKeys.Contains(hotkeyId))
         {
             return true;

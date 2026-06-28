@@ -15,8 +15,8 @@ public sealed class ThemeService
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaUseImmersiveDarkModeBefore20H1 = 19;
 
-    public string CurrentTheme { get; private set; } = LightTheme;
-    public string EffectiveTheme { get; private set; } = LightTheme;
+    public string CurrentTheme { get; private set; } = DarkTheme;
+    public string EffectiveTheme { get; private set; } = DarkTheme;
 
     public void ApplyTheme(string theme)
     {
@@ -53,7 +53,7 @@ public sealed class ThemeService
     {
         if (string.IsNullOrWhiteSpace(theme))
         {
-            return LightTheme;
+            return DarkTheme;
         }
 
         return theme.Trim().ToLowerInvariant() switch

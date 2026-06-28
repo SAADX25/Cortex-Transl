@@ -8,7 +8,11 @@ public sealed class AppSettings
 
     public string AppMode { get; set; } = "Simple";
 
-    public string UsageType { get; set; } = "Game";
+    public string UsageType { get; set; } = "Game Dialogue";
+
+    public string TranslationMode { get; set; } = "subtitle";
+
+    public string OcrPreset { get; set; } = "normal";
 
     public string TranslationQuality { get; set; } = "Balanced";
 
@@ -18,7 +22,7 @@ public sealed class AppSettings
 
     public bool UseDeepLFreeApi { get; set; } = true;
 
-    public string Theme { get; set; } = "Light";
+    public string Theme { get; set; } = "Dark";
 
     public bool AutoTranslateEnabled { get; set; } = false;
 

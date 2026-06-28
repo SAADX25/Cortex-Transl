@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private readonly GlobalHotkeyService _hotkeyService = new();
     private readonly MainViewModel _viewModel;
     private readonly AppSettingsService _appSettingsService;
+    private readonly ThemeService _themeService;
 
     public MainWindow()
     {
@@ -31,7 +32,7 @@ public partial class MainWindow : Window
         var cacheRepository = new SqliteTranslationCacheRepository(connectionFactory);
         var profileRepository = new SqliteGameProfileRepository(connectionFactory);
         _appSettingsService = new AppSettingsService(paths.DataDirectory);
-        var themeService = new ThemeService();
+        _themeService = new ThemeService();
         var translationProviderSettings = new TranslationProviderSettings();
         var screenCaptureService = new ScreenCaptureService();
         var pipeline = new CaptureTranslatePipeline(
@@ -42,7 +43,8 @@ public partial class MainWindow : Window
                 new DeepLTranslationProvider(translationProviderSettings)
             ],
             cacheRepository,
-            timingLogger);
+            timingLogger,
+            paths.DebugCaptureDirectory);
 
         _viewModel = new MainViewModel(
             migrator,
@@ -52,10 +54,11 @@ public partial class MainWindow : Window
             profileRepository,
             translationProviderSettings,
             _appSettingsService,
-            themeService,
+            _themeService,
             timingLogger);
 
         DataContext = _viewModel;
+        _viewModel.CopyTextRequested += OnCopyTextRequested;
 
         Loaded += OnLoaded;
         Closed += OnClosed;
@@ -66,6 +69,7 @@ public partial class MainWindow : Window
         try
         {
             var settings = await _appSettingsService.LoadAsync();
+            _themeService.ApplyTheme(settings.Theme);
             if (!settings.HasRunSetupWizard)
             {
                 var wizard = new SetupWizardWindow(_appSettingsService)
@@ -86,7 +90,7 @@ public partial class MainWindow : Window
             if (f8Registered && f9Registered && f10Registered)
             {
                 _hotkeyService.HotkeyPressed += OnHotkeyPressed;
-                _viewModel.SetStatus("Ready. Select a dialogue region to begin.");
+                _viewModel.SetStatus("Ready. Select a region to begin.");
             }
             else
             {
@@ -168,8 +172,14 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _viewModel.CopyTextRequested -= OnCopyTextRequested;
         _hotkeyService.Dispose();
         _viewModel.Dispose();
+    }
+
+    private void OnCopyTextRequested(object? sender, string text)
+    {
+        Clipboard.SetText(text);
     }
 
     private void SimpleMode_Click(object sender, RoutedEventArgs e)
@@ -189,7 +199,7 @@ public partial class MainWindow : Window
             Owner = this
         };
         wizard.ShowDialog();
-        
+
         // Reload settings to apply the wizard choices
         _ = _viewModel.InitializeAsync();
     }

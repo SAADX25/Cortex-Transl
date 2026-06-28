@@ -10,11 +10,14 @@ public sealed class AppDataPaths
 
     public string LogPath { get; }
 
+    public string DebugCaptureDirectory { get; }
+
     private AppDataPaths(string dataDirectory)
     {
         DataDirectory = dataDirectory;
         DatabasePath = Path.Combine(dataDirectory, "cortex-transl.db");
         LogPath = Path.Combine(dataDirectory, "logs", "app.log");
+        DebugCaptureDirectory = Path.Combine(dataDirectory, "debug-captures");
     }
 
     public static AppDataPaths CreateDefault()
@@ -28,6 +31,7 @@ public sealed class AppDataPaths
         var dataDirectory = Path.Combine(root, "Cortex Transl");
         Directory.CreateDirectory(dataDirectory);
         Directory.CreateDirectory(Path.Combine(dataDirectory, "logs"));
+        Directory.CreateDirectory(Path.Combine(dataDirectory, "debug-captures"));
         return new AppDataPaths(dataDirectory);
     }
 }

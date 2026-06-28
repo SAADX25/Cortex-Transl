@@ -151,7 +151,8 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
             Text = [text],
             TargetLanguage = MapLanguage(targetLanguage, isTarget: true),
             SplitSentences = "0",
-            PreserveFormatting = true
+            PreserveFormatting = true,
+            TagHandling = LooksLikeLineBatch(text) ? "xml" : null
         };
 
         if (!sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
@@ -183,6 +184,12 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         };
     }
 
+    private static bool LooksLikeLineBatch(string text)
+    {
+        return text.Contains("<line id=", StringComparison.OrdinalIgnoreCase) &&
+            text.Contains("</line>", StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed record DeepLRequest(DeepLTranslateRequest Payload, int EstimatedUtf8Bytes);
 
     private sealed class DeepLTranslateRequest
@@ -202,6 +209,10 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
 
         [JsonPropertyName("preserve_formatting")]
         public bool PreserveFormatting { get; init; } = true;
+
+        [JsonPropertyName("tag_handling")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TagHandling { get; init; }
     }
 
     private sealed class DeepLTranslateResponse
