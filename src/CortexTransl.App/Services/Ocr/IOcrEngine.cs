@@ -12,5 +12,6 @@ public interface IOcrEngine
         Bitmap bitmap,
         string sourceLanguage,
         string ocrPreset,
+        string ocrGranularity,
         CancellationToken cancellationToken = default);
 }

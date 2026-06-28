@@ -23,6 +23,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly ThemeService _themeService;
     private readonly TimingLogger _timingLogger;
     private readonly SemaphoreSlim _translationLock = new(1, 1);
+    private readonly object _activeCaptureGate = new();
+    private CancellationTokenSource? _activeCaptureCts;
+    private static readonly TimeSpan F10DebounceInterval = TimeSpan.FromMilliseconds(450);
 
     private CaptureRegion _selectedRegion = CaptureRegion.Empty;
     private string _sourceLanguage = "en";
@@ -31,6 +34,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _translationProvider = "placeholder";
     private string _translationMode = "subtitle";
     private string _ocrPreset = "normal";
+    private string _ocrGranularity = "line";
+    private bool _showInlineTranslationsOnScreen = true;
+    private string _lensOverlayStyle = "compact-lens";
+    private bool _lensReplaceOriginalText = true;
+    private bool _translateAppNames;
+    private bool _hideMainWindowDuringLensCapture = true;
+    private bool _isCaptureInProgress;
+    private bool _isLensOverlayVisible;
+    private DateTimeOffset _lastF10Utc = DateTimeOffset.MinValue;
     private string _selectedTheme = "Dark";
     private double _overlayFontSize = 32;
     private double _overlayOpacity = 1;
@@ -64,6 +76,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public event EventHandler<string>? CopyTextRequested;
 
+    public event EventHandler? HideMainWindowForLensCaptureRequested;
+
+    public event EventHandler? RestoreMainWindowAfterLensCaptureRequested;
+
     public MainViewModel(
         DatabaseMigrator databaseMigrator,
         IRegionSelectionService regionSelectionService,
@@ -86,7 +102,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _timingLogger = timingLogger;
 
         SelectRegionCommand = new AsyncRelayCommand(_ => SelectRegionAsync());
-        CaptureAndTranslateCommand = new AsyncRelayCommand(_ => CaptureAndTranslateAsync());
+        CaptureAndTranslateCommand = new AsyncRelayCommand(
+            _ => CaptureAndTranslateAsync(),
+            allowConcurrentExecution: true);
         SaveProfileCommand = new AsyncRelayCommand(_ => SaveProfileAsync(), _ => !SelectedRegion.IsEmpty);
         LoadSelectedProfileCommand = new RelayCommand(_ => LoadSelectedProfile(), _ => SelectedProfile is not null);
         ToggleAutoTranslateCommand = new RelayCommand(_ => ToggleAutoTranslate(), _ => IsSubtitleMode);
@@ -131,7 +149,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<OptionItem> TranslationModeOptions { get; } =
     [
         new("subtitle", "Subtitle Mode"),
-        new("menu", "Menu / Screen Mode")
+        new("menu", "Menu / Screen Mode"),
+        new("lens", "Lens Mode")
     ];
 
     public IReadOnlyList<OptionItem> OcrPresetOptions { get; } =
@@ -139,6 +158,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         new("normal", "Normal"),
         new("small-text", "Small Text"),
         new("high-contrast", "High Contrast Text")
+    ];
+
+    public IReadOnlyList<OptionItem> OcrGranularityOptions { get; } =
+    [
+        new("line", "Line mode"),
+        new("small-ui-text", "Small UI text mode"),
+        new("desktop-icons", "Desktop Icon Labels"),
+        new("word-label", "Word / label mode")
+    ];
+
+    public IReadOnlyList<OptionItem> LensOverlayStyleOptions { get; } =
+    [
+        new("compact-lens", "Compact Lens Style"),
+        new("replace", "Replace Style"),
+        new("side-by-side", "Attached Side-by-Side Style"),
+        new("above-below", "Above / Below Style")
     ];
 
     public IReadOnlyList<OptionItem> TranslationQualityOptions { get; } =
@@ -264,11 +299,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             var normalizedMode = NormalizeTranslationMode(value);
             if (SetProperty(ref _translationMode, normalizedMode))
             {
-                if (IsMenuScreenMode && OcrPreset.Equals("normal", StringComparison.OrdinalIgnoreCase))
+                if (IsRegionTranslationMode && OcrPreset.Equals("normal", StringComparison.OrdinalIgnoreCase))
                 {
                     _ocrPreset = "small-text";
                     OnPropertyChanged(nameof(OcrPreset));
                     OnPropertyChanged(nameof(OcrPresetDisplayName));
+                    ResetDebugMetrics();
+                }
+
+                if (IsLensMode && OcrGranularity.Equals("line", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ocrGranularity = "small-ui-text";
+                    OnPropertyChanged(nameof(OcrGranularity));
+                    OnPropertyChanged(nameof(OcrGranularityDisplayName));
                     ResetDebugMetrics();
                 }
                 else if (IsSubtitleMode && OcrPreset.Equals("small-text", StringComparison.OrdinalIgnoreCase))
@@ -279,7 +322,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     ResetDebugMetrics();
                 }
 
-                if (IsMenuScreenMode && IsAutoTranslateEnabled)
+                if (IsRegionTranslationMode && IsAutoTranslateEnabled)
                 {
                     IsAutoTranslateEnabled = false;
                     StopAutoTranslate(hideOverlay: true, updateStatus: true);
@@ -288,11 +331,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 _pipeline.ResetState();
                 OnPropertyChanged(nameof(IsSubtitleMode));
                 OnPropertyChanged(nameof(IsMenuScreenMode));
+                OnPropertyChanged(nameof(IsLensMode));
+                OnPropertyChanged(nameof(IsRegionTranslationMode));
                 OnPropertyChanged(nameof(ShowSubtitleAdvancedControls));
                 OnPropertyChanged(nameof(CaptureButtonLabel));
                 OnPropertyChanged(nameof(AutoTranslateButtonLabel));
                 OnPropertyChanged(nameof(ModeInstructionText));
                 OnPropertyChanged(nameof(MenuResultHint));
+                OnPropertyChanged(nameof(ScreenTranslationTitle));
+                OnF10StateChanged();
                 ToggleAutoTranslateCommand.RaiseCanExecuteChanged();
                 _ = SaveSettingsAsync();
             }
@@ -302,6 +349,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public bool IsSubtitleMode => TranslationMode.Equals("subtitle", StringComparison.OrdinalIgnoreCase);
 
     public bool IsMenuScreenMode => TranslationMode.Equals("menu", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsLensMode => TranslationMode.Equals("lens", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsRegionTranslationMode => IsMenuScreenMode || IsLensMode;
 
     public string OcrPreset
     {
@@ -319,23 +370,159 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string CaptureButtonLabel => IsMenuScreenMode ? "Translate Screen Region" : "Capture Once";
+    public string CaptureButtonLabel => IsLensMode
+        ? "Translate with Lens"
+        : IsMenuScreenMode
+            ? "Translate Screen Region"
+            : "Capture Once";
 
-    public string ModeInstructionText => IsMenuScreenMode
-        ? "Select the game menu, then press Translate Screen Region."
-        : "Select the dialogue area, then start Auto Translate or capture once.";
+    public string F10ActionText => IsLensMode && (_isCaptureInProgress || _isLensOverlayVisible || _overlayService.IsLensOverlayVisible)
+        ? "Clear Overlay"
+        : "Capture / Translate";
+
+    public string ModeInstructionText => IsLensMode
+        ? "Select one large area, then press Translate with Lens."
+        : IsMenuScreenMode
+            ? "Select the game menu, then press Translate Screen Region."
+            : "Select the dialogue area, then start Auto Translate or capture once.";
 
     public string MenuResultHint => HasMenuResult
         ? MenuTextBlocks.Count > 0
-            ? $"{MenuTextBlocks.Count} detected line(s)."
+            ? $"{MenuTextBlocks.Count} detected {(IsLensMode ? "block(s)" : "line(s)")}."
             : "Provider returned a full translated block."
-        : "Menu translations will appear here after you translate a selected screen region.";
+        : IsLensMode
+            ? "Lens translations will appear inline on screen and here after capture."
+            : "Menu translations will appear here after you translate a selected screen region.";
 
     public bool HasMenuResult => MenuTextBlocks.Count > 0 || !string.IsNullOrWhiteSpace(TranslatedText);
+
+    public string ScreenTranslationTitle => IsLensMode
+        ? "LENS MODE TRANSLATION"
+        : "MENU / SCREEN TRANSLATION";
 
     public string OcrPresetDisplayName => OcrPresetOptions
         .FirstOrDefault(option => option.Id.Equals(OcrPreset, StringComparison.OrdinalIgnoreCase))
         ?.Name ?? "Normal";
+
+    public string OcrGranularity
+    {
+        get => _ocrGranularity;
+        set
+        {
+            var normalizedGranularity = NormalizeOcrGranularity(value);
+            if (SetProperty(ref _ocrGranularity, normalizedGranularity))
+            {
+                _pipeline.ResetState();
+                OnPropertyChanged(nameof(OcrGranularityDisplayName));
+                ResetDebugMetrics();
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public string OcrGranularityDisplayName => OcrGranularityOptions
+        .FirstOrDefault(option => option.Id.Equals(OcrGranularity, StringComparison.OrdinalIgnoreCase))
+        ?.Name ?? "Line mode";
+
+    public bool ShowInlineTranslationsOnScreen
+    {
+        get => _showInlineTranslationsOnScreen;
+        set
+        {
+            if (SetProperty(ref _showInlineTranslationsOnScreen, value))
+            {
+                _ = SaveSettingsAsync();
+                if (!value && IsLensMode)
+                {
+                    _overlayService.ClearText();
+                    _isLensOverlayVisible = false;
+                    OnF10StateChanged();
+                }
+                else
+                {
+                    _ = RefreshVisibleOverlayAsync();
+                }
+            }
+        }
+    }
+
+    public string LensOverlayStyle
+    {
+        get => _lensOverlayStyle;
+        set
+        {
+            var normalizedStyle = NormalizeLensOverlayStyle(value);
+            if (SetProperty(ref _lensOverlayStyle, normalizedStyle))
+            {
+                _ = SaveSettingsAsync();
+                OnLensPreviewChanged();
+                _ = RefreshVisibleOverlayAsync();
+            }
+        }
+    }
+
+    public bool LensReplaceOriginalText
+    {
+        get => _lensReplaceOriginalText;
+        set
+        {
+            if (SetProperty(ref _lensReplaceOriginalText, value))
+            {
+                _ = SaveSettingsAsync();
+                OnLensPreviewChanged();
+                _ = RefreshVisibleOverlayAsync();
+            }
+        }
+    }
+
+    public bool TranslateAppNames
+    {
+        get => _translateAppNames;
+        set
+        {
+            if (SetProperty(ref _translateAppNames, value))
+            {
+                _pipeline.ResetState();
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public bool HideMainWindowDuringLensCapture
+    {
+        get => _hideMainWindowDuringLensCapture;
+        set
+        {
+            if (SetProperty(ref _hideMainWindowDuringLensCapture, value))
+            {
+                _ = SaveSettingsAsync();
+            }
+        }
+    }
+
+    public double LensPreviewCardLeft => IsPreviewReplacePlacement
+        ? 58
+        : LensOverlayStyle.Equals("above-below", StringComparison.OrdinalIgnoreCase)
+            ? 58
+            : 170;
+
+    public double LensPreviewCardTop => IsPreviewReplacePlacement
+        ? 44
+        : LensOverlayStyle.Equals("above-below", StringComparison.OrdinalIgnoreCase)
+            ? 70
+            : 44;
+
+    public double LensPreviewCardWidth => IsPreviewReplacePlacement ? 104 : 112;
+
+    public double LensPreviewCardHeight => 24;
+
+    public double LensPreviewSourceOpacity => IsPreviewReplacePlacement ? 0.34 : 1.0;
+
+    public double LensPreviewCardOpacity => IsPreviewReplacePlacement ? 0.84 : 0.78;
+
+    private bool IsPreviewReplacePlacement =>
+        LensOverlayStyle.Equals("replace", StringComparison.OrdinalIgnoreCase) ||
+        (LensOverlayStyle.Equals("compact-lens", StringComparison.OrdinalIgnoreCase) && LensReplaceOriginalText);
 
     public CaptureRegion SelectedRegion
     {
@@ -688,6 +875,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _usageType = appSettings.UsageType;
         _translationMode = NormalizeTranslationMode(appSettings.TranslationMode);
         _ocrPreset = NormalizeOcrPreset(appSettings.OcrPreset);
+        _ocrGranularity = NormalizeOcrGranularity(appSettings.OcrGranularity);
+        _showInlineTranslationsOnScreen = appSettings.ShowInlineTranslationsOnScreen;
+        _lensOverlayStyle = NormalizeLensOverlayStyle(appSettings.LensOverlayStyle);
+        _lensReplaceOriginalText = appSettings.LensReplaceOriginalText;
+        _translateAppNames = appSettings.TranslateAppNames;
+        _hideMainWindowDuringLensCapture = appSettings.HideMainWindowDuringLensCapture;
+        if (_translationMode.Equals("lens", StringComparison.OrdinalIgnoreCase) &&
+            _ocrGranularity.Equals("line", StringComparison.OrdinalIgnoreCase))
+        {
+            _ocrGranularity = "small-ui-text";
+        }
         _translationQuality = appSettings.TranslationQuality;
         _translationProvider = appSettings.Provider;
         _selectedTheme = ThemeService.NormalizeTheme(appSettings.Theme);
@@ -727,11 +925,23 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(TranslationMode));
         OnPropertyChanged(nameof(IsSubtitleMode));
         OnPropertyChanged(nameof(IsMenuScreenMode));
+        OnPropertyChanged(nameof(IsLensMode));
+        OnPropertyChanged(nameof(IsRegionTranslationMode));
         OnPropertyChanged(nameof(OcrPreset));
         OnPropertyChanged(nameof(OcrPresetDisplayName));
+        OnPropertyChanged(nameof(OcrGranularity));
+        OnPropertyChanged(nameof(OcrGranularityDisplayName));
+        OnPropertyChanged(nameof(ShowInlineTranslationsOnScreen));
+        OnPropertyChanged(nameof(LensOverlayStyle));
+        OnPropertyChanged(nameof(LensReplaceOriginalText));
+        OnPropertyChanged(nameof(TranslateAppNames));
+        OnPropertyChanged(nameof(HideMainWindowDuringLensCapture));
+        OnLensPreviewChanged();
         OnPropertyChanged(nameof(CaptureButtonLabel));
+        OnPropertyChanged(nameof(F10ActionText));
         OnPropertyChanged(nameof(ModeInstructionText));
         OnPropertyChanged(nameof(MenuResultHint));
+        OnPropertyChanged(nameof(ScreenTranslationTitle));
         OnPropertyChanged(nameof(TranslationQuality));
         OnPropertyChanged(nameof(TranslationProvider));
         OnPropertyChanged(nameof(SelectedTheme));
@@ -775,6 +985,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             UsageType = _usageType,
             TranslationMode = _translationMode,
             OcrPreset = _ocrPreset,
+            OcrGranularity = _ocrGranularity,
+            ShowInlineTranslationsOnScreen = _showInlineTranslationsOnScreen,
+            LensOverlayStyle = _lensOverlayStyle,
+            LensReplaceOriginalText = _lensReplaceOriginalText,
+            TranslateAppNames = _translateAppNames,
+            HideMainWindowDuringLensCapture = _hideMainWindowDuringLensCapture,
             TranslationQuality = _translationQuality,
             Provider = _translationProvider,
             EncryptedDeepLApiKey = _appSettingsService.EncryptApiKey(_deepLApiKey),
@@ -799,9 +1015,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void ToggleAutoTranslate()
     {
-        if (IsMenuScreenMode)
+        if (!IsSubtitleMode)
         {
-            StatusMessage = "Auto Translate is available in Subtitle Mode. Use Translate Screen Region for menus.";
+            StatusMessage = "Auto Translate is available in Subtitle Mode. Use the translate button for screen modes.";
             return;
         }
 
@@ -838,6 +1054,33 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private async Task ShowOverlayAsync()
     {
+        if (IsLensMode)
+        {
+            if (!ShowInlineTranslationsOnScreen)
+            {
+                StatusMessage = "Inline Lens translations are disabled.";
+                return;
+            }
+
+            var lensBlocks = MenuTextBlocks
+                .Where(block => !string.IsNullOrWhiteSpace(block.TranslatedText))
+                .ToArray();
+
+            if (lensBlocks.Length == 0)
+            {
+                StatusMessage = "Capture with Lens Mode before showing the inline overlay.";
+                return;
+            }
+
+            await _overlayService.ShowBlocksAsync(lensBlocks, SelectedRegion, CreateOverlaySettings());
+            _overlayHiddenByUser = false;
+            _hiddenOverlayText = null;
+            _isLensOverlayVisible = true;
+            OnF10StateChanged();
+            StatusMessage = "F10 Clear Overlay";
+            return;
+        }
+
         if (IsMenuScreenMode)
         {
             StatusMessage = "Menu / Screen Mode shows translations in the result panel.";
@@ -859,21 +1102,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _overlayService.Hide();
         _overlayHiddenByUser = true;
         _hiddenOverlayText = TranslatedText;
+        _isLensOverlayVisible = false;
+        OnF10StateChanged();
         StatusMessage = "Overlay hidden.";
     }
 
     private void ClearTranslation()
     {
-        OriginalText = string.Empty;
-        TranslatedText = string.Empty;
-        MenuTextBlocks.Clear();
-        OnPropertyChanged(nameof(HasMenuResult));
-        OnPropertyChanged(nameof(MenuResultHint));
-        CopyMenuTranslationsCommand.RaiseCanExecuteChanged();
-        _overlayService.ClearText();
-        _pipeline.ResetState();
-        _overlayHiddenByUser = false;
-        _hiddenOverlayText = null;
+        ClearLensOverlay(clearResults: true);
         ResetDebugMetrics();
         StatusMessage = "Translation cleared.";
     }
@@ -905,7 +1141,37 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private async Task RefreshVisibleOverlayAsync()
     {
-        if (!_overlayService.IsVisible || string.IsNullOrWhiteSpace(TranslatedText))
+        if (!_overlayService.IsVisible)
+        {
+            return;
+        }
+
+        if (IsLensMode)
+        {
+            if (!ShowInlineTranslationsOnScreen)
+            {
+                _overlayService.ClearText();
+                _isLensOverlayVisible = false;
+                OnF10StateChanged();
+                return;
+            }
+
+            var lensBlocks = MenuTextBlocks
+                .Where(block => !string.IsNullOrWhiteSpace(block.TranslatedText))
+                .ToArray();
+
+            if (lensBlocks.Length == 0)
+            {
+                return;
+            }
+
+            await _overlayService.ShowBlocksAsync(lensBlocks, SelectedRegion, CreateOverlaySettings());
+            _isLensOverlayVisible = true;
+            OnF10StateChanged();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(TranslatedText))
         {
             return;
         }
@@ -926,7 +1192,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             _overlayCustomTop,
             OverlayRenderMode,
             OverlayPositionUnlocked,
-            OverlayClickThrough);
+            OverlayClickThrough,
+            ToOverlayRenderStyle(_lensOverlayStyle),
+            LensReplaceOriginalText);
     }
 
     private static string NormalizeOverlayPositionPreset(string value)
@@ -1018,17 +1286,174 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         StatusMessage = message;
     }
 
-    public async Task CaptureAndTranslateAsync(CancellationToken cancellationToken = default)
+    public async Task HandleF10HotkeyAsync()
     {
-        await CaptureAndTranslateInternalAsync(cancellationToken, isAutoCapture: false);
-    }
-
-    private async Task CaptureAndTranslateInternalAsync(CancellationToken cancellationToken, bool isAutoCapture)
-    {
-        if (!await _translationLock.WaitAsync(0, cancellationToken))
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastF10Utc < F10DebounceInterval)
         {
             return;
         }
+
+        _lastF10Utc = now;
+
+        if (_isCaptureInProgress)
+        {
+            CancelActiveCapture();
+            return;
+        }
+
+        if (IsLensMode && (_isLensOverlayVisible || _overlayService.IsLensOverlayVisible))
+        {
+            ClearLensOverlay(clearResults: true);
+            StatusMessage = "F10 Capture / Translate";
+            return;
+        }
+
+        StatusMessage = "F10 Capture / Translate";
+        await CaptureAndTranslateAsync();
+    }
+
+    private void CancelActiveCapture()
+    {
+        lock (_activeCaptureGate)
+        {
+            _activeCaptureCts?.Cancel();
+        }
+
+        ClearLensOverlay(clearResults: true);
+        _isCaptureInProgress = false;
+        StatusMessage = "Translation cancelled";
+        OnF10StateChanged();
+    }
+
+    private void ClearLensOverlay(bool clearResults)
+    {
+        if (clearResults)
+        {
+            OriginalText = string.Empty;
+            TranslatedText = string.Empty;
+            MenuTextBlocks.Clear();
+            OnPropertyChanged(nameof(HasMenuResult));
+            OnPropertyChanged(nameof(MenuResultHint));
+            CopyMenuTranslationsCommand.RaiseCanExecuteChanged();
+        }
+
+        _overlayService.ClearText();
+        _overlayService.Hide();
+        _pipeline.ResetState();
+        _overlayHiddenByUser = false;
+        _hiddenOverlayText = null;
+        _isLensOverlayVisible = false;
+        OnF10StateChanged();
+    }
+
+    private void OnF10StateChanged()
+    {
+        OnPropertyChanged(nameof(F10ActionText));
+    }
+
+    public async Task CaptureAndTranslateAsync(CancellationToken cancellationToken = default)
+    {
+        using var captureCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        CancellationTokenSource? previousCaptureCts;
+
+        lock (_activeCaptureGate)
+        {
+            previousCaptureCts = _activeCaptureCts;
+            _activeCaptureCts = captureCts;
+        }
+
+        previousCaptureCts?.Cancel();
+
+        try
+        {
+            await CaptureAndTranslateInternalAsync(
+                captureCts.Token,
+                isAutoCapture: false,
+                waitForActiveCapture: true);
+        }
+        finally
+        {
+            lock (_activeCaptureGate)
+            {
+                if (ReferenceEquals(_activeCaptureCts, captureCts))
+                {
+                    _activeCaptureCts = null;
+                }
+            }
+        }
+    }
+
+    private static string NormalizeLensOverlayStyle(string? style)
+    {
+        return string.IsNullOrWhiteSpace(style)
+            ? "compact-lens"
+            : style.Trim().ToLowerInvariant() switch
+            {
+                "replace" => "replace",
+                "replace style" => "replace",
+                "side-by-side" => "side-by-side",
+                "attached side-by-side style" => "side-by-side",
+                "attached side by side style" => "side-by-side",
+                "above-below" => "above-below",
+                "above / below style" => "above-below",
+                "above/below style" => "above-below",
+                "compact lens style" => "compact-lens",
+                "compact-lens" => "compact-lens",
+                _ => "compact-lens"
+            };
+    }
+
+    private static OverlayRenderStyle ToOverlayRenderStyle(string style)
+    {
+        return NormalizeLensOverlayStyle(style) switch
+        {
+            "replace" => OverlayRenderStyle.Replace,
+            "side-by-side" => OverlayRenderStyle.AttachedSideBySide,
+            "above-below" => OverlayRenderStyle.AboveBelow,
+            _ => OverlayRenderStyle.CompactLens
+        };
+    }
+
+    private void OnLensPreviewChanged()
+    {
+        OnPropertyChanged(nameof(LensPreviewCardLeft));
+        OnPropertyChanged(nameof(LensPreviewCardTop));
+        OnPropertyChanged(nameof(LensPreviewCardWidth));
+        OnPropertyChanged(nameof(LensPreviewCardHeight));
+        OnPropertyChanged(nameof(LensPreviewSourceOpacity));
+        OnPropertyChanged(nameof(LensPreviewCardOpacity));
+    }
+
+    private async Task CaptureAndTranslateInternalAsync(
+        CancellationToken cancellationToken,
+        bool isAutoCapture,
+        bool waitForActiveCapture = false)
+    {
+        if (waitForActiveCapture)
+        {
+            await _translationLock.WaitAsync(cancellationToken);
+        }
+        else if (!await _translationLock.WaitAsync(0, cancellationToken))
+        {
+            return;
+        }
+
+        var restoreMainWindowAfterCapture = false;
+
+        void RestoreMainWindowIfNeeded()
+        {
+            if (!restoreMainWindowAfterCapture)
+            {
+                return;
+            }
+
+            RestoreMainWindowAfterLensCaptureRequested?.Invoke(this, EventArgs.Empty);
+            restoreMainWindowAfterCapture = false;
+        }
+
+        _isCaptureInProgress = true;
+        OnF10StateChanged();
 
         try
         {
@@ -1039,7 +1464,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            StatusMessage = IsMenuScreenMode ? "Capturing menu region..." : "Capturing...";
+            StatusMessage = IsLensMode
+                ? "Capturing Lens region..."
+                : IsMenuScreenMode
+                    ? "Capturing menu region..."
+                    : "Capturing...";
             _translationProviderSettings.DeepLApiKey = DeepLApiKey;
             _translationProviderSettings.UseDeepLFreeApi = UseDeepLFreeApi;
 
@@ -1049,13 +1478,27 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 OcrEngine,
                 TranslationProvider,
                 TranslationMode,
-                OcrPreset);
+                OcrPreset,
+                OcrGranularity,
+                TranslateAppNames);
             if (TranslationProvider.Equals("deepl", StringComparison.OrdinalIgnoreCase))
             {
                 StatusMessage = "Translating with DeepL...";
             }
 
-            var result = await _pipeline.RunAsync(SelectedRegion, settings, cancellationToken);
+            if (IsLensMode && HideMainWindowDuringLensCapture)
+            {
+                HideMainWindowForLensCaptureRequested?.Invoke(this, EventArgs.Empty);
+                restoreMainWindowAfterCapture = true;
+                await Task.Delay(180, cancellationToken);
+            }
+
+            var result = await _pipeline.RunAsync(
+                SelectedRegion,
+                settings,
+                cancellationToken,
+                RestoreMainWindowIfNeeded);
+            RestoreMainWindowIfNeeded();
 
             OriginalText = result.OriginalText;
             TranslatedText = result.TranslatedText;
@@ -1068,7 +1511,23 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
 
             long? overlayElapsed = null;
-            if (ShouldShowOverlay(result, isAutoCapture, cancellationToken))
+            if (ShouldShowLensOverlay(result, cancellationToken))
+            {
+                overlayElapsed = await _overlayService.ShowBlocksAsync(
+                    result.TextBlocks,
+                    SelectedRegion,
+                    CreateOverlaySettings(),
+                    cancellationToken);
+                _overlayHiddenByUser = false;
+                _hiddenOverlayText = null;
+                _isLensOverlayVisible = true;
+                OnF10StateChanged();
+
+                var overlayTiming = new TimingEntry("lens overlay update", overlayElapsed.Value);
+                LastTimings.Add(overlayTiming);
+                await _timingLogger.LogAsync("lens-overlay-update", [overlayTiming], cancellationToken);
+            }
+            else if (ShouldShowOverlay(result, isAutoCapture, cancellationToken))
             {
                 overlayElapsed = await _overlayService.ShowTextAsync(
                     result.TranslatedText,
@@ -1082,33 +1541,42 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 LastTimings.Add(overlayTiming);
                 await _timingLogger.LogAsync("overlay-update", [overlayTiming], cancellationToken);
             }
-            else if (IsMenuScreenMode)
+            else if (IsRegionTranslationMode)
             {
                 _overlayService.Hide();
+                _isLensOverlayVisible = false;
+                OnF10StateChanged();
             }
             UpdateDebugMetrics(result, overlayElapsed);
-            StatusMessage = GetUserStatusMessage(result);
+            StatusMessage = IsLensMode && _isLensOverlayVisible
+                ? "F10 Clear Overlay"
+                : GetUserStatusMessage(result);
 
             if (IsAutoTranslateEnabled)
                 AutoTranslateStatusText = "Auto Translate running.";
         }
-        catch (OperationCanceledException) when (isAutoCapture && !IsAutoTranslateEnabled)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            RestoreMainWindowIfNeeded();
         }
         catch (Exception ex)
         {
+            RestoreMainWindowIfNeeded();
             StatusMessage = ex.Message;
             ResetDebugMetrics();
         }
         finally
         {
+            RestoreMainWindowIfNeeded();
+            _isCaptureInProgress = false;
+            OnF10StateChanged();
             _translationLock.Release();
         }
     }
 
     private bool ShouldShowOverlay(PipelineResult result, bool isAutoCapture, CancellationToken cancellationToken)
     {
-        if (IsMenuScreenMode)
+        if (!IsSubtitleMode)
         {
             return false;
         }
@@ -1134,9 +1602,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         return true;
     }
 
+    private bool ShouldShowLensOverlay(PipelineResult result, CancellationToken cancellationToken)
+    {
+        return IsLensMode &&
+            ShowInlineTranslationsOnScreen &&
+            !cancellationToken.IsCancellationRequested &&
+            result.TextBlocks.Any(block => !block.Bounds.IsEmpty && !string.IsNullOrWhiteSpace(block.TranslatedText));
+    }
+
     private string GetUserStatusMessage(PipelineResult result)
     {
-        if (IsMenuScreenMode)
+        if (IsRegionTranslationMode)
         {
             return result.TextBlocks.Count > 0 && !string.IsNullOrWhiteSpace(result.TranslatedText)
                 ? result.Status
@@ -1169,7 +1645,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         try
         {
             var mode = RegionSelectionMode.Auto;
-            if (UsageType.Equals("Fullscreen Game", StringComparison.OrdinalIgnoreCase) || IsMenuScreenMode)
+            if (UsageType.Equals("Fullscreen Game", StringComparison.OrdinalIgnoreCase) || IsRegionTranslationMode)
             {
                 mode = RegionSelectionMode.Screenshot;
             }
@@ -1186,9 +1662,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
 
             SelectedRegion = region;
-            StatusMessage = IsMenuScreenMode
-                ? "Menu region selected. Press Translate Screen Region."
-                : "Region selected.";
+            StatusMessage = IsLensMode
+                ? "Lens region selected. Press Translate with Lens."
+                : IsMenuScreenMode
+                    ? "Menu region selected. Press Translate Screen Region."
+                    : "Region selected.";
             _pipeline.ResetState();
             _ = RefreshVisibleOverlayAsync();
         }
@@ -1271,6 +1749,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         DebugMetrics.Add(new DebugMetric("Translation", FormatFirstTiming(result.Timings, "translation", "translation skipped")));
         DebugMetrics.Add(new DebugMetric("Overlay", overlayElapsed is null ? "not shown" : $"{overlayElapsed.Value} ms"));
         DebugMetrics.Add(new DebugMetric("OCR Preset", OcrPresetDisplayName));
+        DebugMetrics.Add(new DebugMetric("Granularity", OcrGranularityDisplayName));
         DebugMetrics.Add(new DebugMetric("Blocks", result.TextBlocks.Count.ToString()));
     }
 
@@ -1284,6 +1763,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         DebugMetrics.Add(new DebugMetric("Translation", "-"));
         DebugMetrics.Add(new DebugMetric("Overlay", "-"));
         DebugMetrics.Add(new DebugMetric("OCR Preset", OcrPresetDisplayName));
+        DebugMetrics.Add(new DebugMetric("Granularity", OcrGranularityDisplayName));
         DebugMetrics.Add(new DebugMetric("Blocks", "-"));
     }
 
@@ -1310,7 +1790,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         MenuTextBlocks.Clear();
 
-        if (IsMenuScreenMode)
+        if (IsRegionTranslationMode)
         {
             foreach (var block in textBlocks)
             {
@@ -1336,12 +1816,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            StatusMessage = "There are no menu translations to copy.";
+            StatusMessage = "There are no screen translations to copy.";
             return;
         }
 
         CopyTextRequested?.Invoke(this, text);
-        StatusMessage = "Menu translations copied.";
+        StatusMessage = "Screen translations copied.";
     }
 
     private static string NormalizeTranslationMode(string? mode)
@@ -1353,6 +1833,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 "menu" => "menu",
                 "menu-screen" => "menu",
                 "menu / screen mode" => "menu",
+                "lens" => "lens",
+                "lens mode" => "lens",
+                "smart screen translation mode" => "lens",
                 _ => "subtitle"
             };
     }
@@ -1368,6 +1851,28 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 "high contrast text" => "high-contrast",
                 "high-contrast" => "high-contrast",
                 _ => "normal"
+            };
+    }
+
+    private static string NormalizeOcrGranularity(string? granularity)
+    {
+        return string.IsNullOrWhiteSpace(granularity)
+            ? "line"
+            : granularity.Trim().ToLowerInvariant() switch
+            {
+                "line mode" => "line",
+                "line" => "line",
+                "small ui text mode" => "small-ui-text",
+                "small-ui-text" => "small-ui-text",
+                "small ui text" => "small-ui-text",
+                "desktop icon labels" => "desktop-icons",
+                "desktop-icons" => "desktop-icons",
+                "desktop" => "desktop-icons",
+                "word/label mode" => "word-label",
+                "word / label mode" => "word-label",
+                "word-label" => "word-label",
+                "word" => "word-label",
+                _ => "line"
             };
     }
 
@@ -1396,6 +1901,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         StopAutoTranslate();
+        lock (_activeCaptureGate)
+        {
+            _activeCaptureCts?.Cancel();
+            _activeCaptureCts = null;
+        }
         _overlayService.OverlayPositionChanged -= OnOverlayPositionChanged;
         _overlayService.Dispose();
         _translationLock.Dispose();

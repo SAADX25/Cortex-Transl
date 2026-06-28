@@ -11,7 +11,9 @@ public sealed record OverlaySettings(
     double? CustomTop,
     string RenderMode,
     bool PositionUnlocked,
-    bool ClickThrough)
+    bool ClickThrough,
+    OverlayRenderStyle LensRenderStyle,
+    bool LensReplaceOriginalText)
 {
     public bool IsRecordingSafe => RenderMode.Equals("recording-safe", StringComparison.OrdinalIgnoreCase);
 

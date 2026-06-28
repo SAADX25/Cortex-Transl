@@ -20,6 +20,8 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly AppSettingsService _appSettingsService;
     private readonly ThemeService _themeService;
+    private WindowState _windowStateBeforeLensCapture = WindowState.Normal;
+    private bool _hiddenForLensCapture;
 
     public MainWindow()
     {
@@ -59,6 +61,8 @@ public partial class MainWindow : Window
 
         DataContext = _viewModel;
         _viewModel.CopyTextRequested += OnCopyTextRequested;
+        _viewModel.HideMainWindowForLensCaptureRequested += OnHideMainWindowForLensCaptureRequested;
+        _viewModel.RestoreMainWindowAfterLensCaptureRequested += OnRestoreMainWindowAfterLensCaptureRequested;
 
         Loaded += OnLoaded;
         Closed += OnClosed;
@@ -83,11 +87,12 @@ public partial class MainWindow : Window
 
             ApiKeyPasswordBox.Password = _viewModel.DeepLApiKey;
 
+            bool f7Registered = _hotkeyService.Register(this, Key.F7);
             bool f8Registered = _hotkeyService.Register(this, Key.F8);
             bool f9Registered = _hotkeyService.Register(this, Key.F9);
             bool f10Registered = _hotkeyService.Register(this, Key.F10);
 
-            if (f8Registered && f9Registered && f10Registered)
+            if (f7Registered && f8Registered && f9Registered && f10Registered)
             {
                 _hotkeyService.HotkeyPressed += OnHotkeyPressed;
                 _viewModel.SetStatus("Ready. Select a region to begin.");
@@ -143,6 +148,16 @@ public partial class MainWindow : Window
                     }
                 });
             }
+            else if (e.Key == Key.F7)
+            {
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (_viewModel.ClearTranslationCommand.CanExecute(null))
+                    {
+                        _viewModel.ClearTranslationCommand.Execute(null);
+                    }
+                });
+            }
             else if (e.Key == Key.F9)
             {
                 await Dispatcher.InvokeAsync(async () =>
@@ -157,10 +172,7 @@ public partial class MainWindow : Window
             {
                 await Dispatcher.InvokeAsync(async () =>
                 {
-                    if (_viewModel.CaptureAndTranslateCommand.CanExecute(null))
-                    {
-                        await _viewModel.CaptureAndTranslateCommand.ExecuteAsync(null);
-                    }
+                    await _viewModel.HandleF10HotkeyAsync();
                 });
             }
         }
@@ -173,6 +185,8 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _viewModel.CopyTextRequested -= OnCopyTextRequested;
+        _viewModel.HideMainWindowForLensCaptureRequested -= OnHideMainWindowForLensCaptureRequested;
+        _viewModel.RestoreMainWindowAfterLensCaptureRequested -= OnRestoreMainWindowAfterLensCaptureRequested;
         _hotkeyService.Dispose();
         _viewModel.Dispose();
     }
@@ -180,6 +194,31 @@ public partial class MainWindow : Window
     private void OnCopyTextRequested(object? sender, string text)
     {
         Clipboard.SetText(text);
+    }
+
+    private void OnHideMainWindowForLensCaptureRequested(object? sender, EventArgs e)
+    {
+        if (_hiddenForLensCapture)
+        {
+            return;
+        }
+
+        _windowStateBeforeLensCapture = WindowState;
+        _hiddenForLensCapture = true;
+        Hide();
+    }
+
+    private void OnRestoreMainWindowAfterLensCaptureRequested(object? sender, EventArgs e)
+    {
+        if (!_hiddenForLensCapture)
+        {
+            return;
+        }
+
+        Show();
+        WindowState = _windowStateBeforeLensCapture;
+        Activate();
+        _hiddenForLensCapture = false;
     }
 
     private void SimpleMode_Click(object sender, RoutedEventArgs e)

@@ -14,6 +14,18 @@ public sealed class AppSettings
 
     public string OcrPreset { get; set; } = "normal";
 
+    public string OcrGranularity { get; set; } = "line";
+
+    public bool ShowInlineTranslationsOnScreen { get; set; } = true;
+
+    public string LensOverlayStyle { get; set; } = "compact-lens";
+
+    public bool LensReplaceOriginalText { get; set; } = true;
+
+    public bool TranslateAppNames { get; set; } = false;
+
+    public bool HideMainWindowDuringLensCapture { get; set; } = true;
+
     public string TranslationQuality { get; set; } = "Balanced";
 
     public string Provider { get; set; } = "placeholder";

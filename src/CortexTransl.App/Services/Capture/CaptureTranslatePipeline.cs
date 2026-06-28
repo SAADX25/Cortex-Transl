@@ -16,6 +16,48 @@ namespace CortexTransl.App.Services.Capture;
 public sealed class CaptureTranslatePipeline
 {
     private const string MenuTranslationMode = "menu";
+    private const string LensTranslationMode = "lens";
+    private const string DesktopIconGranularity = "desktop-icons";
+
+    private static readonly IReadOnlyDictionary<string, string> DesktopLabelAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["this pc"] = "This PC",
+        ["his pc"] = "This PC",
+        ["is pc"] = "This PC",
+        ["recycle bin"] = "Recycle Bin",
+        ["ecycle bin"] = "Recycle Bin",
+        ["cycle bin"] = "Recycle Bin",
+        ["control panel"] = "Control Panel",
+        ["ntrol panel"] = "Control Panel",
+        ["ontrol panel"] = "Control Panel",
+        ["microsoft edge"] = "Microsoft Edge",
+        ["icrosoft edge"] = "Microsoft Edge",
+        ["visual studio code"] = "Visual Studio Code",
+        ["isual studio code"] = "Visual Studio Code",
+        ["steam"] = "Steam",
+        ["discord"] = "Discord",
+        ["ubisoft connect"] = "Ubisoft Connect",
+        ["brave"] = "Brave",
+        ["google chrome"] = "Google Chrome"
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> OfficialArabicScreenTranslations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["this pc"] = "\u0647\u0630\u0627 \u0627\u0644\u0643\u0645\u0628\u064a\u0648\u062a\u0631",
+        ["recycle bin"] = "\u0633\u0644\u0629 \u0627\u0644\u0645\u062d\u0630\u0648\u0641\u0627\u062a",
+        ["control panel"] = "\u0644\u0648\u062d\u0629 \u0627\u0644\u062a\u062d\u0643\u0645"
+    };
+
+    private static readonly IReadOnlySet<string> KnownAppNameKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "microsoft edge",
+        "visual studio code",
+        "steam",
+        "discord",
+        "ubisoft connect",
+        "brave",
+        "google chrome"
+    };
     private readonly IScreenCaptureService _screenCaptureService;
     private readonly IReadOnlyDictionary<string, IOcrEngine> _ocrEngines;
     private readonly IReadOnlyDictionary<string, ITranslationProvider> _translationProviders;
@@ -49,7 +91,8 @@ public sealed class CaptureTranslatePipeline
     public async Task<PipelineResult> RunAsync(
         CaptureRegion region,
         PipelineSettings settings,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action? afterCapture = null)
     {
         var timings = new List<TimingEntry>();
 
@@ -57,8 +100,9 @@ public sealed class CaptureTranslatePipeline
         using var bitmap = await _screenCaptureService.CaptureAsync(region, cancellationToken);
         captureStopwatch.Stop();
         timings.Add(new TimingEntry("capture", captureStopwatch.ElapsedMilliseconds));
+        afterCapture?.Invoke();
 
-        if (IsMenuMode(settings))
+        if (IsScreenBlockMode(settings))
         {
             var debugCaptureStopwatch = Stopwatch.StartNew();
             SaveDebugCapture(bitmap);
@@ -90,10 +134,11 @@ public sealed class CaptureTranslatePipeline
                 bitmap,
                 settings.SourceLanguage,
                 settings.OcrPreset,
+                settings.OcrGranularity,
                 cancellationToken);
 
             textBlocks = NormalizeTextBlocks(ocrResult.Blocks);
-            normalizedText = IsMenuMode(settings) && textBlocks.Count > 0
+            normalizedText = IsScreenBlockMode(settings) && textBlocks.Count > 0
                 ? string.Join(Environment.NewLine, textBlocks.Select(block => block.Text))
                 : TextNormalizer.Normalize(ocrResult.Text);
             ocrStopwatch.Stop();
@@ -112,8 +157,8 @@ public sealed class CaptureTranslatePipeline
             return await CompleteAsync(
                 string.Empty,
                 string.Empty,
-                IsMenuMode(settings)
-                    ? "OCR did not detect menu text. Select a clear UI panel and try Small Text or High Contrast Text."
+                IsScreenBlockMode(settings)
+                    ? "OCR did not detect screen text. Select a clear UI panel and try Small Text or High Contrast Text."
                     : "OCR did not detect text. Make sure the selected region contains clear dialogue.",
                 "not checked",
                 "not checked",
@@ -121,9 +166,9 @@ public sealed class CaptureTranslatePipeline
                 cancellationToken);
         }
 
-        if (IsMenuMode(settings))
+        if (IsScreenBlockMode(settings))
         {
-            return await RunMenuTranslationAsync(
+            return await RunScreenBlockTranslationAsync(
                 normalizedText,
                 textBlocks,
                 settings,
@@ -256,7 +301,7 @@ public sealed class CaptureTranslatePipeline
             textBlocks);
     }
 
-    private async Task<PipelineResult> RunMenuTranslationAsync(
+    private async Task<PipelineResult> RunScreenBlockTranslationAsync(
         string panelText,
         IReadOnlyList<RecognizedTextBlock> recognizedBlocks,
         PipelineSettings settings,
@@ -264,8 +309,13 @@ public sealed class CaptureTranslatePipeline
         List<TimingEntry> timings,
         CancellationToken cancellationToken)
     {
+        var isLensMode = IsLensMode(settings);
+        var modeDisplayName = isLensMode ? "Lens Mode" : "Menu / Screen Mode";
+        var blockDisplayName = isLensMode ? "block" : "line";
         var translationProvider = ResolveTranslationProvider(settings.TranslationProvider);
         var providerStatus = translationProvider.GetStatus();
+        var translatedBlocks = PrepareScreenBlocksForTranslation(recognizedBlocks, settings);
+        panelText = string.Join(Environment.NewLine, translatedBlocks.Select(block => block.Text));
         var translationKey = CreateTranslationKey(panelText, settings, translationProvider.Id);
 
         if (translationKey == _lastTranslationKey &&
@@ -277,8 +327,8 @@ public sealed class CaptureTranslatePipeline
                 panelText,
                 _lastTranslatedText,
                 ocrWasSkipped
-                    ? "Menu region is unchanged; reused OCR and translations."
-                    : "Menu text is unchanged; reused previous translations.",
+                    ? $"{modeDisplayName} region is unchanged; reused OCR and translations."
+                    : $"{modeDisplayName} text is unchanged; reused previous translations.",
                 "skipped",
                 providerStatus,
                 timings,
@@ -286,13 +336,37 @@ public sealed class CaptureTranslatePipeline
                 CloneBlocks(_lastTranslatedBlocks));
         }
 
-        var translatedBlocks = CloneBlocks(recognizedBlocks);
-        var missingBlocks = new List<RecognizedTextBlock>();
+        var missingBlocksByText = new Dictionary<string, List<RecognizedTextBlock>>(StringComparer.Ordinal);
+        var cachedTranslationsByText = new Dictionary<string, string>(StringComparer.Ordinal);
+        var checkedTexts = new HashSet<string>(StringComparer.Ordinal);
         var cacheHits = 0;
 
         var cacheStopwatch = Stopwatch.StartNew();
         foreach (var block in translatedBlocks)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!string.IsNullOrWhiteSpace(block.TranslatedText))
+            {
+                cachedTranslationsByText[block.Text] = block.TranslatedText;
+                cacheHits++;
+                continue;
+            }
+
+            if (cachedTranslationsByText.TryGetValue(block.Text, out var alreadyCachedTranslation))
+            {
+                block.TranslatedText = alreadyCachedTranslation;
+                cacheHits++;
+                continue;
+            }
+
+            if (checkedTexts.Contains(block.Text))
+            {
+                AddMissingBlock(missingBlocksByText, block);
+                continue;
+            }
+
+            checkedTexts.Add(block.Text);
             var cachedTranslation = await _cacheRepository.GetAsync(
                 block.Text,
                 settings.SourceLanguage,
@@ -302,11 +376,12 @@ public sealed class CaptureTranslatePipeline
 
             if (string.IsNullOrWhiteSpace(cachedTranslation))
             {
-                missingBlocks.Add(block);
+                AddMissingBlock(missingBlocksByText, block);
             }
             else
             {
                 block.TranslatedText = cachedTranslation;
+                cachedTranslationsByText[block.Text] = cachedTranslation;
                 cacheHits++;
             }
         }
@@ -314,14 +389,17 @@ public sealed class CaptureTranslatePipeline
         timings.Add(new TimingEntry("cache lookup", cacheStopwatch.ElapsedMilliseconds));
 
         var cacheStatus = cacheHits == translatedBlocks.Count ? "hit" : cacheHits > 0 ? "partial hit" : "miss";
-        if (missingBlocks.Count == 0)
+        if (missingBlocksByText.Count == 0)
         {
             timings.Add(new TimingEntry("cache hit", 0));
         }
         else
         {
             timings.Add(new TimingEntry("cache miss", 0));
-            var batch = BuildLineBatch(missingBlocks);
+            var representativeMissingBlocks = missingBlocksByText.Values
+                .Select(blocks => blocks[0])
+                .ToArray();
+            var batch = BuildLineBatch(representativeMissingBlocks);
             var translationStopwatch = Stopwatch.StartNew();
             string translatedBatch;
 
@@ -358,6 +436,23 @@ public sealed class CaptureTranslatePipeline
             var parsedTranslations = ParseLineBatch(translatedBatch);
             if (parsedTranslations.Count == 0)
             {
+                if (isLensMode)
+                {
+                    _lastTranslationKey = null;
+                    _lastTranslatedText = string.Empty;
+                    _lastTranslatedBlocks = CloneBlocks(translatedBlocks);
+
+                    return await CompleteAsync(
+                        panelText,
+                        string.Empty,
+                        "Lens Mode requires per-block mapping, but the provider returned a merged translation. No inline overlay was shown.",
+                        cacheStatus,
+                        providerStatus,
+                        timings,
+                        cancellationToken,
+                        translatedBlocks);
+                }
+
                 _lastTranslationKey = translationKey;
                 _lastTranslatedText = translatedBatch.Trim();
                 _lastTranslatedBlocks = CloneBlocks(translatedBlocks);
@@ -373,20 +468,25 @@ public sealed class CaptureTranslatePipeline
                     translatedBlocks);
             }
 
-            foreach (var block in missingBlocks)
+            foreach (var representativeBlock in representativeMissingBlocks)
             {
-                if (!parsedTranslations.TryGetValue(block.LineIndex, out var translatedLine) ||
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!parsedTranslations.TryGetValue(representativeBlock.LineIndex, out var translatedLine) ||
                     string.IsNullOrWhiteSpace(translatedLine))
                 {
                     translatedLine = string.Empty;
                 }
 
-                block.TranslatedText = translatedLine;
+                foreach (var block in missingBlocksByText[representativeBlock.Text])
+                {
+                    block.TranslatedText = translatedLine;
+                }
 
                 if (!string.IsNullOrWhiteSpace(translatedLine))
                 {
                     await _cacheRepository.SaveAsync(
-                        block.Text,
+                        representativeBlock.Text,
                         settings.SourceLanguage,
                         settings.TargetLanguage,
                         translationProvider.Id,
@@ -396,14 +496,14 @@ public sealed class CaptureTranslatePipeline
             }
         }
 
-        var translatedText = BuildMenuDisplayText(translatedBlocks);
+        var translatedText = BuildScreenDisplayText(translatedBlocks);
         _lastTranslationKey = translationKey;
         _lastTranslatedText = translatedText;
         _lastTranslatedBlocks = CloneBlocks(translatedBlocks);
 
         var status = cacheStatus.Equals("hit", StringComparison.OrdinalIgnoreCase)
-            ? $"Loaded {translatedBlocks.Count} menu lines from cache."
-            : $"Translated {translatedBlocks.Count} menu lines in one batch.";
+            ? $"Loaded {translatedBlocks.Count} {blockDisplayName}s from cache."
+            : $"{modeDisplayName} translated {translatedBlocks.Count} detected {blockDisplayName}s in one batch.";
 
         return await CompleteAsync(
             panelText,
@@ -411,7 +511,7 @@ public sealed class CaptureTranslatePipeline
             status,
             cacheStatus,
             cacheStatus.Equals("hit", StringComparison.OrdinalIgnoreCase)
-                ? $"{providerStatus} (line cache hit)"
+                ? $"{providerStatus} ({blockDisplayName} cache hit)"
                 : providerStatus,
             timings,
             cancellationToken,
@@ -472,6 +572,16 @@ public sealed class CaptureTranslatePipeline
         return settings.TranslationMode.Equals(MenuTranslationMode, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsLensMode(PipelineSettings settings)
+    {
+        return settings.TranslationMode.Equals(LensTranslationMode, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsScreenBlockMode(PipelineSettings settings)
+    {
+        return IsMenuMode(settings) || IsLensMode(settings);
+    }
+
     private static IReadOnlyList<RecognizedTextBlock> NormalizeTextBlocks(IReadOnlyList<RecognizedTextBlock> blocks)
     {
         return blocks
@@ -510,6 +620,106 @@ public sealed class CaptureTranslatePipeline
                 TranslatedText = block.TranslatedText
             })
             .ToArray();
+    }
+
+    private static IReadOnlyList<RecognizedTextBlock> PrepareScreenBlocksForTranslation(
+        IReadOnlyList<RecognizedTextBlock> blocks,
+        PipelineSettings settings)
+    {
+        return blocks
+            .Select(block =>
+            {
+                var text = PrepareScreenText(block.Text, settings);
+                var translatedText = TryGetLocalScreenTranslation(text, settings, out var localTranslation)
+                    ? localTranslation
+                    : string.Empty;
+
+                return new RecognizedTextBlock
+                {
+                    Text = text,
+                    Bounds = block.Bounds,
+                    LineIndex = block.LineIndex,
+                    Confidence = block.Confidence,
+                    TranslatedText = translatedText
+                };
+            })
+            .Where(block => !string.IsNullOrWhiteSpace(block.Text))
+            .Select((block, index) => new RecognizedTextBlock
+            {
+                Text = block.Text,
+                Bounds = block.Bounds,
+                LineIndex = index + 1,
+                Confidence = block.Confidence,
+                TranslatedText = block.TranslatedText
+            })
+            .ToArray();
+    }
+
+    private static string PrepareScreenText(string text, PipelineSettings settings)
+    {
+        var normalized = TextNormalizer.Normalize(text);
+        var key = NormalizeScreenLabelKey(normalized);
+        if (DesktopLabelAliases.TryGetValue(key, out var canonicalText))
+        {
+            return canonicalText;
+        }
+
+        if (!IsDesktopIconMode(settings))
+        {
+            return normalized;
+        }
+
+        return normalized;
+    }
+
+    private static bool TryGetLocalScreenTranslation(
+        string text,
+        PipelineSettings settings,
+        out string translatedText)
+    {
+        var key = NormalizeScreenLabelKey(text);
+        if (settings.TargetLanguage.Equals("ar", StringComparison.OrdinalIgnoreCase) &&
+            OfficialArabicScreenTranslations.TryGetValue(key, out var officialArabic))
+        {
+            translatedText = officialArabic;
+            return true;
+        }
+
+        if (!settings.TranslateAppNames &&
+            (KnownAppNameKeys.Contains(key) || IsDesktopIconMode(settings) || LooksLikeFileOrShortcutName(text)))
+        {
+            translatedText = text;
+            return true;
+        }
+
+        translatedText = string.Empty;
+        return false;
+    }
+
+    private static bool IsDesktopIconMode(PipelineSettings settings)
+    {
+        return settings.OcrGranularity.Equals(DesktopIconGranularity, StringComparison.OrdinalIgnoreCase) ||
+            settings.OcrGranularity.Equals("desktop icon labels", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeScreenLabelKey(string text)
+    {
+        var lowered = TextNormalizer.Normalize(text).ToLowerInvariant();
+        lowered = Regex.Replace(lowered, @"[^\p{L}\p{N}\s]+", " ");
+        return Regex.Replace(lowered, @"\s+", " ").Trim();
+    }
+
+    private static bool LooksLikeFileOrShortcutName(string text)
+    {
+        var trimmed = text.Trim();
+        if (Regex.IsMatch(trimmed, @"\.[A-Za-z0-9]{1,5}$"))
+        {
+            return true;
+        }
+
+        var key = NormalizeScreenLabelKey(trimmed);
+        return key.Length is >= 2 and <= 24 &&
+            Regex.IsMatch(trimmed, @"^[A-Z0-9][A-Z0-9 _.-]*$");
     }
 
     private static string BuildLineBatch(IEnumerable<RecognizedTextBlock> blocks)
@@ -551,7 +761,20 @@ public sealed class CaptureTranslatePipeline
         return translations;
     }
 
-    private static string BuildMenuDisplayText(IReadOnlyList<RecognizedTextBlock> blocks)
+    private static void AddMissingBlock(
+        IDictionary<string, List<RecognizedTextBlock>> missingBlocksByText,
+        RecognizedTextBlock block)
+    {
+        if (!missingBlocksByText.TryGetValue(block.Text, out var blocks))
+        {
+            blocks = [];
+            missingBlocksByText[block.Text] = blocks;
+        }
+
+        blocks.Add(block);
+    }
+
+    private static string BuildScreenDisplayText(IReadOnlyList<RecognizedTextBlock> blocks)
     {
         var translatedLines = blocks
             .Where(block => !string.IsNullOrWhiteSpace(block.TranslatedText))
@@ -568,7 +791,8 @@ public sealed class CaptureTranslatePipeline
             settings.SourceLanguage,
             settings.OcrEngine,
             settings.TranslationMode,
-            settings.OcrPreset);
+            settings.OcrPreset,
+            settings.OcrGranularity);
     }
 
     private void SaveDebugCapture(Bitmap bitmap)
@@ -581,7 +805,7 @@ public sealed class CaptureTranslatePipeline
         try
         {
             Directory.CreateDirectory(_debugCaptureDirectory);
-            var path = Path.Combine(_debugCaptureDirectory, "last-menu-capture.png");
+            var path = Path.Combine(_debugCaptureDirectory, "last-screen-capture.png");
             bitmap.Save(path, ImageFormat.Png);
         }
         catch
@@ -598,6 +822,8 @@ public sealed class CaptureTranslatePipeline
             settings.SourceLanguage,
             settings.TargetLanguage,
             providerId,
-            settings.TranslationMode);
+            settings.TranslationMode,
+            settings.OcrGranularity,
+            settings.TranslateAppNames);
     }
 }

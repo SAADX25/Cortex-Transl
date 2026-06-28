@@ -6,4 +6,6 @@ public sealed record PipelineSettings(
     string OcrEngine,
     string TranslationProvider,
     string TranslationMode,
-    string OcrPreset);
+    string OcrPreset,
+    string OcrGranularity,
+    bool TranslateAppNames);

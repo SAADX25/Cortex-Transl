@@ -8,8 +8,16 @@ public interface IOverlayService : IDisposable
 
     bool IsVisible { get; }
 
+    bool IsLensOverlayVisible { get; }
+
     Task<long> ShowTextAsync(
         string text,
+        CaptureRegion region,
+        OverlaySettings settings,
+        CancellationToken cancellationToken = default);
+
+    Task<long> ShowBlocksAsync(
+        IReadOnlyList<RecognizedTextBlock> textBlocks,
         CaptureRegion region,
         OverlaySettings settings,
         CancellationToken cancellationToken = default);

@@ -2,9 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Cortex Transl"
-        Width="1100"
+        Width="1180"
         Height="720"
-        MinWidth="960"
+        MinWidth="1040"
         MinHeight="680"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource AppBackgroundBrush}">
@@ -96,7 +96,7 @@
         <Grid Grid.Row="1" Margin="16,16,16,0">
             <Grid.ColumnDefinitions>
                 <!-- Left sidebar -->
-                <ColumnDefinition Width="310" />
+                <ColumnDefinition Width="340" />
                 <ColumnDefinition Width="16" />
                 <!-- Right main area -->
                 <ColumnDefinition Width="*" />
@@ -212,6 +212,118 @@
                                     </Button.Style>
                                 </Button>
                             </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Lens Mode -->
+                    <Border Style="{StaticResource CardBorder}"
+                            Visibility="{Binding IsLensMode, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="LENS MODE" Style="{StaticResource SectionTitle}" />
+
+                            <CheckBox IsChecked="{Binding ShowInlineTranslationsOnScreen, Mode=TwoWay}"
+                                      Margin="0,0,0,10">
+                                <TextBlock Text="Show inline translations on screen"
+                                           TextWrapping="Wrap" />
+                            </CheckBox>
+
+                            <TextBlock Text="Overlay style" Style="{StaticResource InputLabel}" />
+                            <ComboBox ItemsSource="{Binding LensOverlayStyleOptions}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding LensOverlayStyle, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,0,0,8"
+                                      ToolTip="Choose how Lens translations attach to each detected OCR box." />
+
+                            <CheckBox IsChecked="{Binding LensReplaceOriginalText, Mode=TwoWay}"
+                                      Margin="0,0,0,8"
+                                      ToolTip="When enabled, Compact Lens and Replace styles draw Arabic inside the source text box. When disabled, translations stay beside the original.">
+                                <TextBlock Text="Replace original text visually / Show beside original"
+                                           TextWrapping="Wrap" />
+                            </CheckBox>
+
+                            <CheckBox IsChecked="{Binding TranslateAppNames, Mode=TwoWay}"
+                                      Margin="0,0,0,8"
+                                      ToolTip="When off, Lens Mode preserves app, brand, and file names like Steam, Discord, and Chrome.">
+                                <TextBlock Text="Translate app names"
+                                           TextWrapping="Wrap" />
+                            </CheckBox>
+
+                            <CheckBox IsChecked="{Binding HideMainWindowDuringLensCapture, Mode=TwoWay}"
+                                      Margin="0,0,0,10"
+                                      ToolTip="Temporarily hides Cortex Transl during Lens capture so it does not OCR its own window.">
+                                <TextBlock Text="Hide main app window during Lens capture"
+                                           TextWrapping="Wrap" />
+                            </CheckBox>
+
+                            <Border Background="{DynamicResource DebugMetricBackgroundBrush}"
+                                    BorderBrush="{DynamicResource CardBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Height="112"
+                                    Margin="0,0,0,12"
+                                    ClipToBounds="True">
+                                <Canvas>
+                                    <TextBlock Canvas.Left="12"
+                                               Canvas.Top="10"
+                                               Text="Overlay Style Preview"
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               Foreground="{DynamicResource SecondaryTextBrush}" />
+
+                                     <Border Canvas.Left="64"
+                                             Canvas.Top="44"
+                                             Width="104"
+                                            Height="24"
+                                            Background="#221E293B"
+                                            BorderBrush="#6694A3B8"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Opacity="{Binding LensPreviewSourceOpacity}">
+                                        <TextBlock Text="Control Panel"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </Border>
+
+                                    <Border Canvas.Left="{Binding LensPreviewCardLeft}"
+                                            Canvas.Top="{Binding LensPreviewCardTop}"
+                                            Width="{Binding LensPreviewCardWidth}"
+                                            Height="{Binding LensPreviewCardHeight}"
+                                            Background="#D9020617"
+                                            BorderBrush="#99FFFFFF"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Opacity="{Binding LensPreviewCardOpacity}"
+                                            Padding="4,1">
+                                        <TextBlock Text="&#x0644;&#x0648;&#x062D;&#x0629; &#x0627;&#x0644;&#x062A;&#x062D;&#x0643;&#x0645;"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="White"
+                                                   FlowDirection="RightToLeft"
+                                                   TextAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center" />
+                                    </Border>
+                                </Canvas>
+                            </Border>
+
+                            <TextBlock Text="OCR granularity" Style="{StaticResource InputLabel}" />
+                            <ComboBox ItemsSource="{Binding OcrGranularityOptions}"
+                                      DisplayMemberPath="Name"
+                                      SelectedValuePath="Id"
+                                      SelectedValue="{Binding OcrGranularity, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="0,0,0,12" />
+
+                            <Button Content="Clear Overlay"
+                                    Command="{Binding ClearTranslationCommand}"
+                                    Style="{StaticResource SecondaryButton}"
+                                    MinWidth="120"
+                                    HorizontalAlignment="Left"
+                                    ToolTip="F7 Clear Overlay" />
                         </StackPanel>
                     </Border>
 
@@ -582,9 +694,9 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Menu / Screen Translation Result -->
+                    <!-- Screen Translation Result -->
                     <Border Style="{StaticResource CardBorder}"
-                            Visibility="{Binding IsMenuScreenMode, Converter={StaticResource BoolToVis}}">
+                            Visibility="{Binding IsRegionTranslationMode, Converter={StaticResource BoolToVis}}">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,12">
                                 <Button DockPanel.Dock="Right"
@@ -593,7 +705,7 @@
                                         Style="{StaticResource SecondaryButton}"
                                         MinWidth="90" />
                                 <StackPanel>
-                                    <TextBlock Text="MENU / SCREEN TRANSLATION"
+                                    <TextBlock Text="{Binding ScreenTranslationTitle}"
                                                Style="{StaticResource SectionTitle}"
                                                Foreground="{DynamicResource SuccessBrush}"
                                                Margin="0,0,0,4" />
@@ -725,16 +837,18 @@
                 BorderThickness="0,1,0,0"
                 Padding="20,10">
             <DockPanel>
-                <TextBlock DockPanel.Dock="Right"
-                           VerticalAlignment="Center"
-                           Margin="0,0,0,0">
-                    <Run Text="F8" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
-                    <Run Text=" Toggle Auto    " Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
-                    <Run Text="F9" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
-                    <Run Text=" Select Region    " Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
-                    <Run Text="F10" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
-                    <Run Text=" Capture / Translate" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
-                </TextBlock>
+                <StackPanel DockPanel.Dock="Right"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Margin="0,0,0,0">
+                    <TextBlock Text="F8" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+                    <TextBlock Text=" Toggle Auto    " Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
+                    <TextBlock Text="F9" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+                    <TextBlock Text=" Select Region    " Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
+                    <TextBlock Text="F10" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+                    <TextBlock Text=" " Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
+                    <TextBlock Text="{Binding F10ActionText, Mode=OneWay}" Foreground="{DynamicResource MutedTextBrush}" FontSize="12" />
+                </StackPanel>
                 <TextBlock AutomationProperties.AutomationId="StatusMessage"
                            Text="{Binding StatusMessage}"
                            Foreground="{DynamicResource SecondaryTextBrush}"

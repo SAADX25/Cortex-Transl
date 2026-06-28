@@ -6,12 +6,17 @@ public sealed class AsyncRelayCommand : ICommand
 {
     private readonly Func<object?, Task> _execute;
     private readonly Predicate<object?>? _canExecute;
+    private readonly bool _allowConcurrentExecution;
     private bool _isExecuting;
 
-    public AsyncRelayCommand(Func<object?, Task> execute, Predicate<object?>? canExecute = null)
+    public AsyncRelayCommand(
+        Func<object?, Task> execute,
+        Predicate<object?>? canExecute = null,
+        bool allowConcurrentExecution = false)
     {
         _execute = execute;
         _canExecute = canExecute;
+        _allowConcurrentExecution = allowConcurrentExecution;
     }
 
     public event EventHandler? CanExecuteChanged;
@@ -33,7 +38,7 @@ public sealed class AsyncRelayCommand : ICommand
 
     public bool CanExecute(object? parameter)
     {
-        return !IsExecuting && (_canExecute?.Invoke(parameter) ?? true);
+        return (_allowConcurrentExecution || !IsExecuting) && (_canExecute?.Invoke(parameter) ?? true);
     }
 
     public async void Execute(object? parameter)
@@ -50,12 +55,19 @@ public sealed class AsyncRelayCommand : ICommand
 
         try
         {
-            IsExecuting = true;
+            if (!_allowConcurrentExecution)
+            {
+                IsExecuting = true;
+            }
+
             await _execute(parameter);
         }
         finally
         {
-            IsExecuting = false;
+            if (!_allowConcurrentExecution)
+            {
+                IsExecuting = false;
+            }
         }
     }
 

@@ -11,14 +11,18 @@ public sealed class OverlayService : IOverlayService
     private readonly SemaphoreSlim _updateGate = new(1, 1);
 
     private OverlayWindow? _overlayWindow;
+    private LensOverlayWindow? _lensOverlayWindow;
     private OverlayRequest? _lastAppliedRequest;
     private OverlayLayoutRequest? _lastLayoutRequest;
     private DateTimeOffset _lastVisualUpdateUtc = DateTimeOffset.MinValue;
     private bool? _currentRecordingSafeMode;
+    private bool? _currentLensRecordingSafeMode;
 
     public event EventHandler<OverlayPositionChangedEventArgs>? OverlayPositionChanged;
 
-    public bool IsVisible => _overlayWindow?.IsVisible == true;
+    public bool IsVisible => _overlayWindow?.IsVisible == true || _lensOverlayWindow?.IsVisible == true;
+
+    public bool IsLensOverlayVisible => _lensOverlayWindow?.IsVisible == true;
 
     public async Task<long> ShowTextAsync(
         string text,
@@ -54,6 +58,7 @@ public sealed class OverlayService : IOverlayService
             cancellationToken.ThrowIfCancellationRequested();
 
             var stopwatch = Stopwatch.StartNew();
+            _lensOverlayWindow?.Hide();
             EnsureWindow(request.Settings);
 
             if (_overlayWindow!.IsVisible != true)
@@ -78,14 +83,67 @@ public sealed class OverlayService : IOverlayService
         }
     }
 
+    public async Task<long> ShowBlocksAsync(
+        IReadOnlyList<RecognizedTextBlock> textBlocks,
+        CaptureRegion region,
+        OverlaySettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        var translatedBlocks = textBlocks
+            .Where(block => !block.Bounds.IsEmpty && !string.IsNullOrWhiteSpace(block.TranslatedText))
+            .ToArray();
+
+        if (translatedBlocks.Length == 0 || region.IsEmpty)
+        {
+            return 0;
+        }
+
+        var normalizedSettings = NormalizeSettings(settings);
+
+        await _updateGate.WaitAsync(cancellationToken);
+        try
+        {
+            var elapsedSinceLastUpdate = DateTimeOffset.UtcNow - _lastVisualUpdateUtc;
+            if (elapsedSinceLastUpdate < MinimumVisualUpdateInterval)
+            {
+                await Task.Delay(MinimumVisualUpdateInterval - elapsedSinceLastUpdate, cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var stopwatch = Stopwatch.StartNew();
+            _overlayWindow?.Hide();
+            EnsureLensWindow(normalizedSettings);
+
+            if (_lensOverlayWindow!.IsVisible != true)
+            {
+                _lensOverlayWindow.Show();
+            }
+
+            _lensOverlayWindow.UpdateBlocks(translatedBlocks, region, normalizedSettings);
+            stopwatch.Stop();
+
+            _lastAppliedRequest = null;
+            _lastLayoutRequest = null;
+            _lastVisualUpdateUtc = DateTimeOffset.UtcNow;
+            return stopwatch.ElapsedMilliseconds;
+        }
+        finally
+        {
+            _updateGate.Release();
+        }
+    }
+
     public void Hide()
     {
         _overlayWindow?.Hide();
+        _lensOverlayWindow?.Hide();
     }
 
     public void ClearText()
     {
         _overlayWindow?.ClearText();
+        _lensOverlayWindow?.ClearBlocks();
         _lastAppliedRequest = null;
     }
 
@@ -93,6 +151,8 @@ public sealed class OverlayService : IOverlayService
     {
         _overlayWindow?.Close();
         _overlayWindow = null;
+        _lensOverlayWindow?.Close();
+        _lensOverlayWindow = null;
         _updateGate.Dispose();
     }
 
@@ -115,6 +175,22 @@ public sealed class OverlayService : IOverlayService
         _lastAppliedRequest = null;
         _lastLayoutRequest = null;
         _overlayWindow.Show();
+    }
+
+    private void EnsureLensWindow(OverlaySettings settings)
+    {
+        if (_lensOverlayWindow is not null && _currentLensRecordingSafeMode == settings.IsRecordingSafe)
+        {
+            return;
+        }
+
+        if (_lensOverlayWindow is not null)
+        {
+            _lensOverlayWindow.Close();
+        }
+
+        _lensOverlayWindow = new LensOverlayWindow(settings.IsRecordingSafe);
+        _currentLensRecordingSafeMode = settings.IsRecordingSafe;
     }
 
     private void OnOverlayPositionChanged(object? sender, OverlayPositionChangedEventArgs e)
