@@ -7,25 +7,61 @@ namespace CortexTransl.App.Services.Capture;
 
 public sealed class ScreenCaptureService : IScreenCaptureService
 {
+    private const int SrcCopy = 0x00CC0020;
+    private const int CaptureBlt = 0x40000000;
+
     public Task<Bitmap> CaptureAsync(CaptureRegion region, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        region = ScreenCoordinates.ClampToVirtualScreen(region);
         if (region.IsEmpty)
         {
-            throw new InvalidOperationException("Select a screen region before capturing.");
-        }
-
-        if (!IsInsideVirtualScreen(region))
-        {
-            throw new InvalidOperationException("The selected region is outside the visible screen. Select the dialogue region again.");
+            throw new InvalidOperationException("Select the dialogue region first.");
         }
 
         var bitmap = new Bitmap(region.Width, region.Height, PixelFormat.Format32bppArgb);
         try
         {
             using var graphics = Graphics.FromImage(bitmap);
-            graphics.CopyFromScreen(region.X, region.Y, 0, 0, new Size(region.Width, region.Height), CopyPixelOperation.SourceCopy);
+            var destination = graphics.GetHdc();
+            var source = GetDC(nint.Zero);
+            var copied = false;
+
+            try
+            {
+                copied = BitBlt(
+                    destination,
+                    0,
+                    0,
+                    region.Width,
+                    region.Height,
+                    source,
+                    region.X,
+                    region.Y,
+                    SrcCopy | CaptureBlt);
+            }
+            finally
+            {
+                if (source != nint.Zero)
+                {
+                    ReleaseDC(nint.Zero, source);
+                }
+
+                graphics.ReleaseHdc(destination);
+            }
+
+            if (!copied)
+            {
+                graphics.CopyFromScreen(
+                    region.X,
+                    region.Y,
+                    0,
+                    0,
+                    new Size(region.Width, region.Height),
+                    CopyPixelOperation.SourceCopy);
+            }
+
             return Task.FromResult(bitmap);
         }
         catch
@@ -35,29 +71,21 @@ public sealed class ScreenCaptureService : IScreenCaptureService
         }
     }
 
-    private static bool IsInsideVirtualScreen(CaptureRegion region)
-    {
-        var left = GetSystemMetrics(SystemMetric.VirtualScreenX);
-        var top = GetSystemMetrics(SystemMetric.VirtualScreenY);
-        var width = GetSystemMetrics(SystemMetric.VirtualScreenWidth);
-        var height = GetSystemMetrics(SystemMetric.VirtualScreenHeight);
-        var right = left + width;
-        var bottom = top + height;
-
-        return region.X >= left
-            && region.Y >= top
-            && region.X + region.Width <= right
-            && region.Y + region.Height <= bottom;
-    }
+    [DllImport("user32.dll")]
+    private static extern nint GetDC(nint hwnd);
 
     [DllImport("user32.dll")]
-    private static extern int GetSystemMetrics(SystemMetric metric);
+    private static extern int ReleaseDC(nint hwnd, nint hdc);
 
-    private enum SystemMetric
-    {
-        VirtualScreenX = 76,
-        VirtualScreenY = 77,
-        VirtualScreenWidth = 78,
-        VirtualScreenHeight = 79
-    }
+    [DllImport("gdi32.dll")]
+    private static extern bool BitBlt(
+        nint destination,
+        int destinationX,
+        int destinationY,
+        int width,
+        int height,
+        nint source,
+        int sourceX,
+        int sourceY,
+        int rasterOperation);
 }

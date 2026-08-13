@@ -4,32 +4,15 @@ namespace CortexTransl.App.Services.Overlay;
 
 public interface IOverlayService : IDisposable
 {
-    event EventHandler<OverlayPositionChangedEventArgs>? OverlayPositionChanged;
-
     bool IsVisible { get; }
 
-    bool IsLensOverlayVisible { get; }
+    void Pin(CaptureRegion region, OverlaySettings settings);
 
-    Task<long> ShowTextAsync(
-        string text,
-        CaptureRegion region,
-        OverlaySettings settings,
-        CancellationToken cancellationToken = default);
+    void SetText(string text);
 
-    Task<long> ShowBlocksAsync(
-        IReadOnlyList<RecognizedTextBlock> textBlocks,
-        CaptureRegion region,
-        OverlaySettings settings,
-        CancellationToken cancellationToken = default);
+    void SetBlocks(IReadOnlyList<TranslatedBlock> blocks);
 
     void Hide();
 
-    void ClearText();
-}
-
-public sealed class OverlayPositionChangedEventArgs(double left, double top) : EventArgs
-{
-    public double Left { get; } = left;
-
-    public double Top { get; } = top;
+    void DisposeOverlay();
 }

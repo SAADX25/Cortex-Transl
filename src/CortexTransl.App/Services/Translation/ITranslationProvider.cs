@@ -4,12 +4,14 @@ public interface ITranslationProvider
 {
     string Id { get; }
 
-    string DisplayName { get; }
-
-    string GetStatus();
-
     Task<string> TranslateAsync(
         string text,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<string>> TranslateManyAsync(
+        IReadOnlyList<string> texts,
         string sourceLanguage,
         string targetLanguage,
         CancellationToken cancellationToken = default);

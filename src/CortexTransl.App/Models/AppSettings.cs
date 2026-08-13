@@ -1,64 +1,32 @@
-using System.Text.Json.Serialization;
-
 namespace CortexTransl.App.Models;
 
 public sealed class AppSettings
 {
-    public bool HasRunSetupWizard { get; set; } = false;
-
-    public string AppMode { get; set; } = "Simple";
-
-    public string UsageType { get; set; } = "Game Dialogue";
-
-    public string TranslationMode { get; set; } = "subtitle";
-
-    public string OcrPreset { get; set; } = "normal";
-
-    public string OcrGranularity { get; set; } = "line";
-
-    public bool ShowInlineTranslationsOnScreen { get; set; } = true;
-
-    public string LensOverlayStyle { get; set; } = "compact-lens";
-
-    public bool LensReplaceOriginalText { get; set; } = true;
-
-    public bool TranslateAppNames { get; set; } = false;
-
-    public bool HideMainWindowDuringLensCapture { get; set; } = true;
-
-    public string TranslationQuality { get; set; } = "Balanced";
-
-    public string Provider { get; set; } = "placeholder";
-
     public string EncryptedDeepLApiKey { get; set; } = string.Empty;
 
     public bool UseDeepLFreeApi { get; set; } = true;
 
     public string Theme { get; set; } = "Dark";
 
-    public bool AutoTranslateEnabled { get; set; } = false;
+    public string SourceLanguage { get; set; } = "en";
 
-    public double AutoTranslateIntervalMs { get; set; } = 700;
+    public string OverlayPlacement { get; set; } = "cover";
 
-    public double OverlayFontSize { get; set; } = 32;
+    public double OverlayBackgroundOpacity { get; set; } = 0.88;
 
-    public double OverlayOpacity { get; set; } = 1;
+    public bool MinimizeDuringPlay { get; set; } = true;
 
-    public double OverlayBackgroundOpacity { get; set; } = 0.86;
+    public double AutoTranslateIntervalMs { get; set; } = 500;
 
-    public double OverlayMaxWidth { get; set; } = 920;
+    public int RegionX { get; set; }
 
-    public string OverlayPositionMode { get; set; } = "locked";
+    public int RegionY { get; set; }
 
-    public string OverlayPositionPreset { get; set; } = "bottom-center";
+    public int RegionWidth { get; set; }
 
-    public double? OverlayCustomLeft { get; set; }
+    public int RegionHeight { get; set; }
 
-    public double? OverlayCustomTop { get; set; }
+    public string ProfileName { get; set; } = string.Empty;
 
-    public bool OverlayPositionUnlocked { get; set; } = false;
-
-    public string OverlayRenderMode { get; set; } = "transparent";
-
-    public bool OverlayClickThrough { get; set; } = true;
+    public string TranslationMode { get; set; } = "dialogue";
 }

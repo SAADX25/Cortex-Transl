@@ -5,8 +5,8 @@ using CortexTransl.App.Services.Hotkeys;
 using CortexTransl.App.Services.Ocr;
 using CortexTransl.App.Services.Overlay;
 using CortexTransl.App.Services.Profiles;
-using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Services.Settings;
+using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
 using CortexTransl.App.ViewModels;
 using System.Windows;
@@ -16,12 +16,19 @@ namespace CortexTransl.App.Views;
 
 public partial class MainWindow : Window
 {
+    private const double CompactWidth = 400;
+    private const double CompactHeight = 540;
+    private static readonly TimeSpan F10DebounceInterval = TimeSpan.FromMilliseconds(280);
+
     private readonly GlobalHotkeyService _hotkeyService = new();
-    private readonly MainViewModel _viewModel;
-    private readonly AppSettingsService _appSettingsService;
-    private readonly ThemeService _themeService;
-    private WindowState _windowStateBeforeLensCapture = WindowState.Normal;
-    private bool _hiddenForLensCapture;
+    private readonly PlayViewModel _viewModel;
+
+    private bool _gamePanelOpen;
+    private WindowState _stateBeforePanel = WindowState.Normal;
+    private Rect _boundsBeforePanel;
+    private double? _compactLeft;
+    private double? _compactTop;
+    private DateTimeOffset _lastF10Utc = DateTimeOffset.MinValue;
 
     public MainWindow()
     {
@@ -29,84 +36,47 @@ public partial class MainWindow : Window
 
         var paths = AppDataPaths.CreateDefault();
         var connectionFactory = new SqliteConnectionFactory(paths.DatabasePath);
-        var migrator = new DatabaseMigrator(connectionFactory);
-        var timingLogger = new TimingLogger(paths.LogPath);
-        var cacheRepository = new SqliteTranslationCacheRepository(connectionFactory);
-        var profileRepository = new SqliteGameProfileRepository(connectionFactory);
-        _appSettingsService = new AppSettingsService(paths.DataDirectory);
-        _themeService = new ThemeService();
-        var translationProviderSettings = new TranslationProviderSettings();
-        var screenCaptureService = new ScreenCaptureService();
-        var pipeline = new CaptureTranslatePipeline(
-            screenCaptureService,
-            [new WindowsOcrEngine()],
-            [
-                new PlaceholderTranslationProvider(),
-                new DeepLTranslationProvider(translationProviderSettings)
-            ],
-            cacheRepository,
-            timingLogger,
-            paths.DebugCaptureDirectory);
+        var translationSettings = new TranslationProviderSettings();
+        var screenCapture = new ScreenCaptureService();
+        var pipeline = new TranslationPipeline(
+            screenCapture,
+            new WindowsOcrEngine(),
+            new DeepLTranslationProvider(translationSettings),
+            new SqliteTranslationCacheRepository(connectionFactory));
 
-        _viewModel = new MainViewModel(
-            migrator,
-            new RegionSelectionService(screenCaptureService),
+        _viewModel = new PlayViewModel(
+            new DatabaseMigrator(connectionFactory),
+            new RegionSelectionService(),
             pipeline,
             new OverlayService(),
-            profileRepository,
-            translationProviderSettings,
-            _appSettingsService,
-            _themeService,
-            timingLogger);
+            new SqliteGameProfileRepository(connectionFactory),
+            translationSettings,
+            new AppSettingsService(paths.DataDirectory),
+            new ThemeService());
 
         DataContext = _viewModel;
-        _viewModel.CopyTextRequested += OnCopyTextRequested;
-        _viewModel.HideMainWindowForLensCaptureRequested += OnHideMainWindowForLensCaptureRequested;
-        _viewModel.RestoreMainWindowAfterLensCaptureRequested += OnRestoreMainWindowAfterLensCaptureRequested;
-
+        _viewModel.MinimizeRequested += OnMinimizeRequested;
         Loaded += OnLoaded;
         Closed += OnClosed;
+        LocationChanged += OnLocationChanged;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         try
         {
-            var settings = await _appSettingsService.LoadAsync();
-            _themeService.ApplyTheme(settings.Theme);
-            if (!settings.HasRunSetupWizard)
-            {
-                var wizard = new SetupWizardWindow(_appSettingsService)
-                {
-                    Owner = this
-                };
-                wizard.ShowDialog();
-            }
-
             await _viewModel.InitializeAsync();
-
             ApiKeyPasswordBox.Password = _viewModel.DeepLApiKey;
 
-            bool f7Registered = _hotkeyService.Register(this, Key.F7);
-            bool f8Registered = _hotkeyService.Register(this, Key.F8);
-            bool f9Registered = _hotkeyService.Register(this, Key.F9);
-            bool f10Registered = _hotkeyService.Register(this, Key.F10);
-
-            if (f7Registered && f8Registered && f9Registered && f10Registered)
-            {
-                _hotkeyService.HotkeyPressed += OnHotkeyPressed;
-                _viewModel.SetStatus("Ready. Select a region to begin.");
-            }
-            else
-            {
-                _hotkeyService.HotkeyPressed += OnHotkeyPressed;
-                _viewModel.SetStatus("Ready, but some hotkeys could not be registered. They may already be in use.");
-            }
+            _hotkeyService.Register(this, Key.F8);
+            _hotkeyService.Register(this, Key.F9);
+            _hotkeyService.Register(this, Key.F10);
+            _hotkeyService.HotkeyPressed += OnHotkeyPressed;
         }
         catch (Exception ex)
         {
-            _viewModel.SetStatus($"Startup failed: {ex.Message}");
-            MessageBox.Show(this, ex.Message, "Cortex Transl startup failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            _viewModel.Dispose();
+            MessageBox.Show(this, ex.Message, "Cortex Transl failed to start", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -118,128 +88,197 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ToggleApiKeyVisibility_Click(object sender, RoutedEventArgs e)
-    {
-        if (ApiKeyPasswordBox.Visibility == Visibility.Visible)
-        {
-            ApiKeyTextBox.Text = ApiKeyPasswordBox.Password;
-            ApiKeyPasswordBox.Visibility = Visibility.Collapsed;
-            ApiKeyTextBox.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            ApiKeyPasswordBox.Password = ApiKeyTextBox.Text;
-            ApiKeyTextBox.Visibility = Visibility.Collapsed;
-            ApiKeyPasswordBox.Visibility = Visibility.Visible;
-        }
-    }
-
     private async void OnHotkeyPressed(object? sender, HotkeyEventArgs e)
     {
         try
         {
             if (e.Key == Key.F8)
             {
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    if (_viewModel.ToggleAutoTranslateCommand.CanExecute(null))
-                    {
-                        _viewModel.ToggleAutoTranslateCommand.Execute(null);
-                    }
-                });
-            }
-            else if (e.Key == Key.F7)
-            {
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    if (_viewModel.ClearTranslationCommand.CanExecute(null))
-                    {
-                        _viewModel.ClearTranslationCommand.Execute(null);
-                    }
-                });
+                await _viewModel.HandleF8Async();
             }
             else if (e.Key == Key.F9)
             {
-                await Dispatcher.InvokeAsync(async () =>
-                {
-                    if (_viewModel.SelectRegionCommand.CanExecute(null))
-                    {
-                        await _viewModel.SelectRegionCommand.ExecuteAsync(null);
-                    }
-                });
+                await SelectRegionFromHotkeyAsync();
             }
             else if (e.Key == Key.F10)
             {
-                await Dispatcher.InvokeAsync(async () =>
-                {
-                    await _viewModel.HandleF10HotkeyAsync();
-                });
+                ToggleGamePanel();
             }
         }
         catch (Exception ex)
         {
-            _viewModel.SetStatus(ex.Message);
+            MessageBox.Show(this, ex.Message, "Cortex Transl", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    private void OnClosed(object? sender, EventArgs e)
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        _viewModel.CopyTextRequested -= OnCopyTextRequested;
-        _viewModel.HideMainWindowForLensCaptureRequested -= OnHideMainWindowForLensCaptureRequested;
-        _viewModel.RestoreMainWindowAfterLensCaptureRequested -= OnRestoreMainWindowAfterLensCaptureRequested;
-        _hotkeyService.Dispose();
-        _viewModel.Dispose();
+        if (e.Key == Key.Escape && _gamePanelOpen)
+        {
+            e.Handled = true;
+            CloseGamePanel();
+            return;
+        }
+
+        if ((e.Key == Key.System && e.SystemKey == Key.F10) || e.Key == Key.F10)
+        {
+            e.Handled = true;
+            if (!_hotkeyService.IsRegistered(Key.F10))
+            {
+                ToggleGamePanel();
+            }
+
+            return;
+        }
+
+        if (e.Key is Key.F8 or Key.F9)
+        {
+            e.Handled = true;
+        }
     }
 
-    private void OnCopyTextRequested(object? sender, string text)
+    private void OnLocationChanged(object? sender, EventArgs e)
     {
-        Clipboard.SetText(text);
+        if (_gamePanelOpen && WindowState == WindowState.Normal)
+        {
+            _compactLeft = Left;
+            _compactTop = Top;
+        }
     }
 
-    private void OnHideMainWindowForLensCaptureRequested(object? sender, EventArgs e)
+    private async Task SelectRegionFromHotkeyAsync()
     {
-        if (_hiddenForLensCapture)
+        var reopenPanel = _gamePanelOpen;
+        if (reopenPanel)
+        {
+            RememberCompactPosition();
+            _gamePanelOpen = false;
+            _viewModel.SuppressAutoCapture = false;
+            Topmost = false;
+            Hide();
+        }
+
+        try
+        {
+            await _viewModel.HandleF9Async();
+        }
+        finally
+        {
+            if (reopenPanel)
+            {
+                ShowGamePanelUi();
+            }
+        }
+    }
+
+    private void ToggleGamePanel()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastF10Utc < F10DebounceInterval)
         {
             return;
         }
 
-        _windowStateBeforeLensCapture = WindowState;
-        _hiddenForLensCapture = true;
-        Hide();
+        _lastF10Utc = now;
+        if (_gamePanelOpen)
+        {
+            CloseGamePanel();
+            return;
+        }
+
+        OpenGamePanel();
     }
 
-    private void OnRestoreMainWindowAfterLensCaptureRequested(object? sender, EventArgs e)
+    private void OpenGamePanel()
     {
-        if (!_hiddenForLensCapture)
+        _stateBeforePanel = WindowState;
+        _boundsBeforePanel = WindowState == WindowState.Normal
+            ? new Rect(Left, Top, ActualWidth > 0 ? ActualWidth : Width, ActualHeight > 0 ? ActualHeight : Height)
+            : RestoreBounds;
+        ShowGamePanelUi();
+    }
+
+    private void ShowGamePanelUi()
+    {
+        _gamePanelOpen = true;
+        _viewModel.SuppressAutoCapture = true;
+        Show();
+        Topmost = true;
+        WindowState = WindowState.Normal;
+        Width = CompactWidth;
+        Height = CompactHeight;
+        PlaceCompactPanel();
+        Activate();
+        _viewModel.SetStatusMessage("Menu open. F10 or Esc returns to the game.");
+    }
+
+    private void PlaceCompactPanel()
+    {
+        var work = ScreenCoordinates.GetCursorWorkAreaDip();
+        var width = Width;
+        var height = Height;
+        var left = _compactLeft ?? (work.Right - width - 16);
+        var top = _compactTop ?? (work.Top + 48);
+        Left = Math.Clamp(left, work.Left, Math.Max(work.Left, work.Right - width));
+        Top = Math.Clamp(top, work.Top, Math.Max(work.Top, work.Bottom - height));
+    }
+
+    private void RememberCompactPosition()
+    {
+        if (WindowState == WindowState.Normal)
         {
+            _compactLeft = Left;
+            _compactTop = Top;
+        }
+    }
+
+    private void CloseGamePanel()
+    {
+        if (!_gamePanelOpen)
+        {
+            return;
+        }
+
+        RememberCompactPosition();
+        _gamePanelOpen = false;
+        _viewModel.SuppressAutoCapture = false;
+        Topmost = false;
+
+        if (_viewModel.IsPlaying && _viewModel.MinimizeDuringPlay)
+        {
+            WindowState = WindowState.Minimized;
+            _viewModel.SetStatusMessage("Back to the game. F10 opens the menu.");
             return;
         }
 
         Show();
-        WindowState = _windowStateBeforeLensCapture;
-        Activate();
-        _hiddenForLensCapture = false;
-    }
-
-    private void SimpleMode_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.AppMode = "Simple";
-    }
-
-    private void AdvancedMode_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.AppMode = "Advanced";
-    }
-
-    private void RunSetupWizard_Click(object sender, RoutedEventArgs e)
-    {
-        var wizard = new SetupWizardWindow(_appSettingsService)
+        WindowState = _stateBeforePanel == WindowState.Maximized
+            ? WindowState.Normal
+            : _stateBeforePanel;
+        if (WindowState == WindowState.Normal && _boundsBeforePanel.Width > 0 && _boundsBeforePanel.Height > 0)
         {
-            Owner = this
-        };
-        wizard.ShowDialog();
+            Left = _boundsBeforePanel.X;
+            Top = _boundsBeforePanel.Y;
+            Width = _boundsBeforePanel.Width;
+            Height = _boundsBeforePanel.Height;
+        }
 
-        // Reload settings to apply the wizard choices
-        _ = _viewModel.InitializeAsync();
+        _viewModel.SetStatusMessage("Menu closed. F10 opens it over the game.");
+    }
+
+    private void OnMinimizeRequested(object? sender, EventArgs e)
+    {
+        RememberCompactPosition();
+        _gamePanelOpen = false;
+        _viewModel.SuppressAutoCapture = false;
+        Topmost = false;
+        WindowState = WindowState.Minimized;
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        _viewModel.MinimizeRequested -= OnMinimizeRequested;
+        _hotkeyService.Dispose();
+        _viewModel.Dispose();
     }
 }

@@ -6,38 +6,60 @@ namespace CortexTransl.App.Services.Capture;
 
 public sealed class RegionSelectionService : IRegionSelectionService
 {
-    private readonly IScreenCaptureService _screenCaptureService;
+    private Window? _activeSelector;
 
-    public RegionSelectionService(IScreenCaptureService screenCaptureService)
+    public bool IsSelecting => _activeSelector is { IsVisible: true };
+
+    public void Cancel()
     {
-        _screenCaptureService = screenCaptureService;
+        var selector = _activeSelector;
+        if (selector is null)
+        {
+            return;
+        }
+
+        selector.Dispatcher.Invoke(() => CloseSelector(selector));
     }
 
-    public async Task<CaptureRegion?> SelectRegionAsync(RegionSelectionMode mode = RegionSelectionMode.Auto)
+    public Task<CaptureRegion?> SelectRegionAsync()
     {
-        Window window;
-        if (mode == RegionSelectionMode.Screenshot)
+        if (IsSelecting)
         {
-            var screenshotWindow = new ScreenshotRegionSelectorWindow(_screenCaptureService);
-            await screenshotWindow.InitializeAsync();
-            window = screenshotWindow;
-        }
-        else
-        {
-            window = new RegionSelectorWindow();
+            Cancel();
+            return Task.FromResult<CaptureRegion?>(null);
         }
 
-        var accepted = window.ShowDialog() == true;
-
-        if (window is RegionSelectorWindow liveWindow)
+        var window = new RegionSelectorWindow();
+        _activeSelector = window;
+        try
         {
-            return accepted ? liveWindow.SelectedRegion : null;
+            var accepted = window.ShowDialog() == true;
+            var region = accepted ? window.SelectedRegion : null;
+            return Task.FromResult(region is null ? null : ScreenCoordinates.ClampToVirtualScreen(region));
         }
-        else if (window is ScreenshotRegionSelectorWindow ssWindow)
+        finally
         {
-            return accepted ? ssWindow.SelectedRegion : null;
+            if (ReferenceEquals(_activeSelector, window))
+            {
+                _activeSelector = null;
+            }
+        }
+    }
+
+    private static void CloseSelector(Window selector)
+    {
+        if (!selector.IsVisible)
+        {
+            return;
         }
 
-        return null;
+        try
+        {
+            selector.DialogResult = false;
+        }
+        catch (InvalidOperationException)
+        {
+            selector.Close();
+        }
     }
 }

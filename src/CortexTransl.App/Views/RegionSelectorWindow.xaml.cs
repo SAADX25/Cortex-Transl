@@ -16,7 +16,7 @@ public partial class RegionSelectorWindow : Window
     {
         InitializeComponent();
         Loaded += OnLoaded;
-        KeyDown += OnKeyDown;
+        PreviewKeyDown += OnPreviewKeyDown;
     }
 
     public CaptureRegion? SelectedRegion { get; private set; }
@@ -83,11 +83,32 @@ public partial class RegionSelectorWindow : Window
         Close();
     }
 
+    private void OnPreviewKeyDown(object sender, WpfKeyEventArgs e)
+    {
+        if (e.Key is Key.Escape or Key.F9 || (e.Key == Key.System && e.SystemKey == Key.F9))
+        {
+            e.Handled = true;
+            CloseSelector();
+        }
+    }
+
     private void OnKeyDown(object sender, WpfKeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        if (e.Key is Key.Escape or Key.F9)
+        {
+            e.Handled = true;
+            CloseSelector();
+        }
+    }
+
+    private void CloseSelector()
+    {
+        try
         {
             DialogResult = false;
+        }
+        catch (InvalidOperationException)
+        {
             Close();
         }
     }

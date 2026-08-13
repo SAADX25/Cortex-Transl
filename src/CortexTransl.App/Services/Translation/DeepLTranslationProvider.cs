@@ -10,25 +10,17 @@ namespace CortexTransl.App.Services.Translation;
 public sealed class DeepLTranslationProvider : ITranslationProvider
 {
     private const int MaximumRequestBytes = 128 * 1024;
+    private const int MaximumBatchSize = 40;
     private readonly TranslationProviderSettings _settings;
     private readonly HttpClient _httpClient;
 
     public DeepLTranslationProvider(TranslationProviderSettings settings, HttpClient? httpClient = null)
     {
         _settings = settings;
-        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
     }
 
     public string Id => "deepl";
-
-    public string DisplayName => "DeepL";
-
-    public string GetStatus()
-    {
-        return string.IsNullOrWhiteSpace(_settings.DeepLApiKey)
-            ? "DeepL missing API key"
-            : "DeepL ready";
-    }
 
     public async Task<string> TranslateAsync(
         string text,
@@ -36,26 +28,102 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         string targetLanguage,
         CancellationToken cancellationToken = default)
     {
+        var translations = await TranslateManyAsync([text], sourceLanguage, targetLanguage, cancellationToken);
+        return translations.Count > 0 ? translations[0] : string.Empty;
+    }
+
+    public async Task<IReadOnlyList<string>> TranslateManyAsync(
+        IReadOnlyList<string> texts,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken = default)
+    {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (string.IsNullOrWhiteSpace(text))
+        if (texts.Count == 0)
         {
-            return string.Empty;
+            return [];
         }
 
         var apiKey = _settings.DeepLApiKey.Trim();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new TranslationProviderException(
-                "DeepL API key is missing. Paste a key or switch back to Placeholder.",
+                "Paste a DeepL API key before translating.",
                 "DeepL missing API key");
         }
 
-        var request = BuildRequest(text, sourceLanguage, targetLanguage);
-        if (request.EstimatedUtf8Bytes > MaximumRequestBytes)
+        var results = new string[texts.Count];
+        var pendingIndexes = new List<int>(texts.Count);
+        for (var index = 0; index < texts.Count; index++)
+        {
+            if (string.IsNullOrWhiteSpace(texts[index]))
+            {
+                results[index] = string.Empty;
+            }
+            else
+            {
+                pendingIndexes.Add(index);
+            }
+        }
+
+        for (var offset = 0; offset < pendingIndexes.Count; offset += MaximumBatchSize)
+        {
+            var batchIndexes = pendingIndexes
+                .Skip(offset)
+                .Take(MaximumBatchSize)
+                .ToArray();
+            var batchTexts = batchIndexes
+                .Select(index => texts[index])
+                .ToArray();
+            var translatedBatch = await TranslateBatchAsync(
+                batchTexts,
+                sourceLanguage,
+                targetLanguage,
+                apiKey,
+                cancellationToken);
+
+            if (translatedBatch.Length != batchTexts.Length)
+            {
+                throw new TranslationProviderException(
+                    "DeepL returned a different number of sentences.",
+                    "DeepL invalid response");
+            }
+
+            for (var batchIndex = 0; batchIndex < batchIndexes.Length; batchIndex++)
+            {
+                results[batchIndexes[batchIndex]] = translatedBatch[batchIndex];
+            }
+        }
+
+        return results;
+    }
+
+    private async Task<string[]> TranslateBatchAsync(
+        string[] texts,
+        string sourceLanguage,
+        string targetLanguage,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
+        var payload = new DeepLTranslateRequest
+        {
+            Text = texts,
+            TargetLanguage = MapLanguage(targetLanguage, isTarget: true),
+            SplitSentences = "0",
+            PreserveFormatting = true
+        };
+
+        if (!sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            payload.SourceLanguage = MapLanguage(sourceLanguage, isTarget: false);
+        }
+
+        var estimatedBytes = texts.Sum(text => Encoding.UTF8.GetByteCount(text)) + 256;
+        if (estimatedBytes > MaximumRequestBytes)
         {
             throw new TranslationProviderException(
-                "DeepL request is too large for one translation call.",
+                "The text is too large for one DeepL request.",
                 "DeepL request too large");
         }
 
@@ -65,10 +133,10 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = JsonContent.Create(request.Payload)
+            Content = JsonContent.Create(payload)
         };
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("DeepL-Auth-Key", apiKey);
-        httpRequest.Headers.UserAgent.ParseAdd("CortexTransl/0.2");
+        httpRequest.Headers.UserAgent.ParseAdd("CortexTransl/1.0");
 
         HttpResponseMessage response;
         try
@@ -78,14 +146,14 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             throw new TranslationProviderException(
-                "DeepL request timed out. Check your network connection and try again.",
+                "DeepL timed out. Check your connection.",
                 "DeepL timeout",
                 ex);
         }
         catch (HttpRequestException ex)
         {
             throw new TranslationProviderException(
-                "DeepL network request failed. Check your connection and try again.",
+                "Could not reach DeepL.",
                 "DeepL network failure",
                 ex);
         }
@@ -133,38 +201,18 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
                 ex);
         }
 
-        var translatedText = responseBody?.Translations?.FirstOrDefault()?.Text?.Trim();
-        if (string.IsNullOrWhiteSpace(translatedText))
+        var translations = responseBody?.Translations?
+            .Select(item => item.Text?.Trim() ?? string.Empty)
+            .ToArray();
+
+        if (translations is null || translations.Length == 0)
         {
             throw new TranslationProviderException(
                 "DeepL returned an empty translation.",
                 "DeepL empty result");
         }
 
-        return translatedText;
-    }
-
-    private static DeepLRequest BuildRequest(string text, string sourceLanguage, string targetLanguage)
-    {
-        var payload = new DeepLTranslateRequest
-        {
-            Text = [text],
-            TargetLanguage = MapLanguage(targetLanguage, isTarget: true),
-            SplitSentences = "0",
-            PreserveFormatting = true,
-            TagHandling = LooksLikeLineBatch(text) ? "xml" : null
-        };
-
-        if (!sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
-        {
-            payload.SourceLanguage = MapLanguage(sourceLanguage, isTarget: false);
-        }
-
-        var estimatedBytes = Encoding.UTF8.GetByteCount(text)
-            + Encoding.UTF8.GetByteCount(payload.TargetLanguage)
-            + 256;
-
-        return new DeepLRequest(payload, estimatedBytes);
+        return translations;
     }
 
     private static string MapLanguage(string language, bool isTarget)
@@ -184,14 +232,6 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         };
     }
 
-    private static bool LooksLikeLineBatch(string text)
-    {
-        return text.Contains("<line id=", StringComparison.OrdinalIgnoreCase) &&
-            text.Contains("</line>", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private sealed record DeepLRequest(DeepLTranslateRequest Payload, int EstimatedUtf8Bytes);
-
     private sealed class DeepLTranslateRequest
     {
         [JsonPropertyName("text")]
@@ -209,10 +249,6 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
 
         [JsonPropertyName("preserve_formatting")]
         public bool PreserveFormatting { get; init; } = true;
-
-        [JsonPropertyName("tag_handling")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        public string? TagHandling { get; init; }
     }
 
     private sealed class DeepLTranslateResponse

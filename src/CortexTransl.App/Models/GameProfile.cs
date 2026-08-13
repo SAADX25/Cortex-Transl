@@ -14,7 +14,7 @@ public sealed class GameProfile
 
     public string OcrEngine { get; set; } = "windows";
 
-    public string TranslationProvider { get; set; } = "placeholder";
+    public string TranslationProvider { get; set; } = "deepl";
 
     public override string ToString()
     {

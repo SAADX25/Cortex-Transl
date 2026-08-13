@@ -1,21 +1,15 @@
 namespace CortexTransl.App.Models;
 
-public sealed record OverlaySettings(
-    double FontSize,
-    double Opacity,
-    double BackgroundOpacity,
-    double MaxWidth,
-    string PositionMode,
-    string PositionPreset,
-    double? CustomLeft,
-    double? CustomTop,
-    string RenderMode,
-    bool PositionUnlocked,
-    bool ClickThrough,
-    OverlayRenderStyle LensRenderStyle,
-    bool LensReplaceOriginalText)
+public sealed record OverlaySettings(string Placement, double BackgroundOpacity, string Mode)
 {
-    public bool IsRecordingSafe => RenderMode.Equals("recording-safe", StringComparison.OrdinalIgnoreCase);
+    public static OverlaySettings Default { get; } = new("cover", 0.88, "dialogue");
 
-    public bool UsesSmartPlacement => PositionMode.Equals("smart", StringComparison.OrdinalIgnoreCase);
+    public string NormalizedPlacement => Placement.ToLowerInvariant() switch
+    {
+        "below" => "below",
+        "above" => "above",
+        _ => "cover"
+    };
+
+    public bool IsListMode => Mode.Equals("list", StringComparison.OrdinalIgnoreCase);
 }

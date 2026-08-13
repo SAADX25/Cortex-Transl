@@ -46,13 +46,20 @@ public sealed class GlobalHotkeyService : IDisposable
             return true;
         }
 
-        bool registered = RegisterHotKey(_handle, hotkeyId, ModNoRepeat, virtualKey);
+        bool registered = RegisterHotKey(_handle, hotkeyId, ModNoRepeat, virtualKey)
+            || RegisterHotKey(_handle, hotkeyId, 0, virtualKey);
         if (registered)
         {
             _registeredKeys.Add(hotkeyId);
         }
 
         return registered;
+    }
+
+    public bool IsRegistered(Key key)
+    {
+        var virtualKey = (int)KeyInterop.VirtualKeyFromKey(key);
+        return _registeredKeys.Contains(virtualKey);
     }
 
     public void Dispose()

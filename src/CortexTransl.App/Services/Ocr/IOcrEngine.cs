@@ -6,12 +6,8 @@ public interface IOcrEngine
 {
     string Id { get; }
 
-    string DisplayName { get; }
-
     Task<OcrResult> RecognizeAsync(
         Bitmap bitmap,
         string sourceLanguage,
-        string ocrPreset,
-        string ocrGranularity,
         CancellationToken cancellationToken = default);
 }

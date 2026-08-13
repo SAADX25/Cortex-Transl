@@ -33,10 +33,18 @@
     <SolidColorBrush x:Key="SliderTrackBrush" Color="#334155" />
     <SolidColorBrush x:Key="SliderFillBrush" Color="#3B82F6" />
     <SolidColorBrush x:Key="SliderThumbBrush" Color="#E5E7EB" />
-    <SolidColorBrush x:Key="DebugMetricBackgroundBrush" Color="#1E293B" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#22C55E" />
     <SolidColorBrush x:Key="SectionHeaderBrush" Color="#93C5FD" />
     <SolidColorBrush x:Key="LabelBrush" Color="#AAB7C7" />
+    <SolidColorBrush x:Key="KeyCapBackgroundBrush" Color="#1E293B" />
+    <SolidColorBrush x:Key="KeyCapBorderBrush" Color="#475569" />
+    <SolidColorBrush x:Key="BadgeReadyBackgroundBrush" Color="#052E16" />
+    <SolidColorBrush x:Key="BadgeReadyTextBrush" Color="#86EFAC" />
+    <SolidColorBrush x:Key="BadgeLiveBackgroundBrush" Color="#1E3A8A" />
+    <SolidColorBrush x:Key="BadgeLiveTextBrush" Color="#BFDBFE" />
+    <SolidColorBrush x:Key="BadgeSetupBackgroundBrush" Color="#1C1917" />
+    <SolidColorBrush x:Key="BadgeSetupTextBrush" Color="#FDBA74" />
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#1E3A5F" />
 
     <SolidColorBrush x:Key="SurfaceBrush" Color="#0B1120" />
     <SolidColorBrush x:Key="CardBrush" Color="#111827" />

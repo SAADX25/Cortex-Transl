@@ -1,8 +1,8 @@
 using CortexTransl.App.Models;
-using CortexTransl.App.Services.Overlay;
+using CortexTransl.App.Services.Capture;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Input;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 
@@ -13,380 +13,363 @@ public partial class OverlayWindow : Window
     private const int GwlExStyle = -20;
     private const int WsExTransparent = 0x00000020;
     private const int WsExToolWindow = 0x00000080;
-    private const int WsExLayered = 0x00080000;
-    private const int MonitorDefaultToNearest = 0x00000002;
-    private const double ScreenMargin = 18;
-    private const double SubtitleBottomMargin = 120;
-    private const double RegionMargin = 20;
+    private const int WsExNoActivate = 0x08000000;
+    private const int HwndTopmost = -1;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint WdaExcludeFromCapture = 0x00000011;
+    private const int PhysicalGap = 8;
 
-    private readonly bool _recordingSafeMode;
-    private string? _lastText;
-    private double _lastFontSize = double.NaN;
-    private double _lastOpacity = double.NaN;
-    private double _lastBackgroundOpacity = double.NaN;
-    private double _lastMaxWidth = double.NaN;
-    private bool? _lastClickThrough;
-    private bool _positionUnlocked;
+    private string _lastText = string.Empty;
+    private CaptureRegion _lastPlacementRect = CaptureRegion.Empty;
+    private string _lastPlacement = string.Empty;
+    private double _lastOpacity = -1;
+    private double _lockedWidth;
+    private double _lockedHeight;
+    private bool _stylesApplied;
+    private bool _affinityApplied;
+    private bool _isListMode;
+    private double _labelOpacity = 0.88;
+    private bool _allowClose;
 
-    public event EventHandler<OverlayPositionChangedEventArgs>? PositionChanged;
-
-    public OverlayWindow(bool recordingSafeMode)
+    public OverlayWindow()
     {
-        _recordingSafeMode = recordingSafeMode;
         InitializeComponent();
-        AllowsTransparency = !recordingSafeMode;
-        Background = recordingSafeMode
-            ? new SolidColorBrush(Color.FromRgb(2, 6, 23))
-            : Brushes.Transparent;
+        SizeToContent = SizeToContent.Manual;
         SourceInitialized += OnSourceInitialized;
+        Loaded += (_, _) => ReapplyLockedPlacement();
+        SizeChanged += OnSizeChanged;
+        Closing += OnClosing;
     }
 
-    public void UpdateText(string text, CaptureRegion region, OverlaySettings settings, bool updatePosition)
+    public void Pin(CaptureRegion region, OverlaySettings settings)
     {
-        var dpi = VisualTreeHelper.GetDpi(this);
-        ApplyContent(text);
-        ApplyVisualSettings(settings);
-        UpdateLayout();
-
-        if (updatePosition)
+        if (region.IsEmpty)
         {
-            UpdatePosition(region, settings, dpi);
+            return;
         }
+
+        ApplyChrome(settings);
+        Place(region, settings.IsListMode ? "cover" : settings.NormalizedPlacement);
+        ApplyExtendedStyles();
+        ExcludeFromCapture();
+        ReapplyLockedPlacement();
     }
 
-    public void ClearText()
+    public void SetText(string text)
     {
-        ApplyContent(string.Empty);
+        if (_isListMode)
+        {
+            return;
+        }
+
+        var trimmed = text.Trim();
+        if (_lastText == trimmed)
+        {
+            return;
+        }
+
+        TranslationText.Text = trimmed;
+        _lastText = trimmed;
+        ReapplyLockedPlacement();
     }
 
-    public static string GetScreenLayoutKey()
+    public void SetBlocks(IReadOnlyList<TranslatedBlock> blocks)
     {
-        return string.Join(
-            "|",
-            SystemParameters.VirtualScreenLeft,
-            SystemParameters.VirtualScreenTop,
-            SystemParameters.VirtualScreenWidth,
-            SystemParameters.VirtualScreenHeight,
-            SystemParameters.WorkArea.Left,
-            SystemParameters.WorkArea.Top,
-            SystemParameters.WorkArea.Width,
-            SystemParameters.WorkArea.Height);
+        if (!_isListMode || _lastPlacementRect.IsEmpty)
+        {
+            return;
+        }
+
+        LabelCanvas.Children.Clear();
+        var dpi = ScreenCoordinates.GetDpiForRegion(_lastPlacementRect);
+        var alpha = (byte)Math.Clamp(_labelOpacity * 255, 180, 245);
+        var fill = new SolidColorBrush(Color.FromArgb(alpha, 2, 6, 23));
+        fill.Freeze();
+
+        foreach (var block in blocks)
+        {
+            if (string.IsNullOrWhiteSpace(block.TranslatedText) || block.Bounds.IsEmpty)
+            {
+                continue;
+            }
+
+            var left = block.Bounds.X / dpi.DpiScaleX;
+            var top = block.Bounds.Y / dpi.DpiScaleY;
+            var width = Math.Max(28, block.Bounds.Width / dpi.DpiScaleX);
+            var height = Math.Max(14, block.Bounds.Height / dpi.DpiScaleY);
+            var fontSize = Math.Clamp(height * 0.72, 9, 18);
+
+            var chip = new Border
+            {
+                Background = fill,
+                Padding = new Thickness(3, 1, 3, 1),
+                CornerRadius = new CornerRadius(2),
+                Width = width,
+                MinHeight = height,
+                Child = new TextBlock
+                {
+                    Text = block.TranslatedText,
+                    Foreground = Brushes.White,
+                    FontSize = fontSize,
+                    FontWeight = FontWeights.SemiBold,
+                    FontFamily = new FontFamily("Segoe UI, Tahoma, Arial"),
+                    TextWrapping = TextWrapping.Wrap,
+                    TextAlignment = TextAlignment.Center,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                }
+            };
+
+            Canvas.SetLeft(chip, left);
+            Canvas.SetTop(chip, top);
+            LabelCanvas.Children.Add(chip);
+        }
+
+        ReapplyLockedPlacement();
+    }
+
+    public void AllowClose()
+    {
+        _allowClose = true;
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         ApplyExtendedStyles();
+        ExcludeFromCapture();
+        ReapplyLockedPlacement();
     }
 
-    private void OnDragHandleMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (!_positionUnlocked || e.LeftButton != MouseButtonState.Pressed)
+        if (!_allowClose)
+        {
+            e.Cancel = true;
+        }
+    }
+
+    private bool _syncingSize;
+
+    private void OnSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_syncingSize || _lockedWidth <= 0 || _lockedHeight <= 0)
         {
             return;
         }
 
-        try
+        if (Math.Abs(Width - _lockedWidth) > 0.5 || Math.Abs(Height - _lockedHeight) > 0.5)
         {
-            DragMove();
-            PositionChanged?.Invoke(this, new OverlayPositionChangedEventArgs(Left, Top));
+            _syncingSize = true;
+            Width = _lockedWidth;
+            Height = _lockedHeight;
+            _syncingSize = false;
         }
-        catch (InvalidOperationException)
-        {
-        }
-
-        e.Handled = true;
     }
 
-    private void ApplyContent(string text)
+    private void ApplyChrome(OverlaySettings settings)
     {
-        if (_lastText == text)
+        _isListMode = settings.IsListMode;
+        var opacity = Math.Clamp(settings.BackgroundOpacity, 0.72, 0.96);
+        _labelOpacity = opacity;
+
+        if (_isListMode)
+        {
+            OverlayChrome.Visibility = Visibility.Collapsed;
+            LabelCanvas.Visibility = Visibility.Visible;
+            Background = Brushes.Transparent;
+            Opacity = 1;
+            _lastOpacity = -1;
+            return;
+        }
+
+        LabelCanvas.Visibility = Visibility.Collapsed;
+        LabelCanvas.Children.Clear();
+        OverlayChrome.Visibility = Visibility.Visible;
+
+        if (Math.Abs(_lastOpacity - opacity) < 0.001)
         {
             return;
         }
 
-        TranslationText.Text = text;
-        _lastText = text;
+        var fill = new SolidColorBrush(Color.FromRgb(2, 6, 23));
+        fill.Freeze();
+        OverlayChrome.Background = fill;
+        Background = fill;
+        Opacity = opacity;
+        _lastOpacity = opacity;
     }
 
-    private void ApplyVisualSettings(OverlaySettings settings)
+    private void Place(CaptureRegion region, string placement)
     {
-        if (!AreClose(_lastFontSize, settings.FontSize))
+        var target = GetPlacementRect(region, placement);
+        LockDipSize(target);
+
+        var hwnd = new WindowInteropHelper(this).EnsureHandle();
+        SetWindowPos(hwnd, HwndTopmost, target.X, target.Y, target.Width, target.Height, SwpNoActivate);
+        ExcludeFromCapture();
+
+        if (!_isListMode && (target != _lastPlacementRect || placement != _lastPlacement))
         {
-            TranslationText.FontSize = settings.FontSize;
-            _lastFontSize = settings.FontSize;
+            var fontSize = Math.Clamp(_lockedHeight * 0.28, 16, 32);
+            TranslationText.FontSize = fontSize;
+            TranslationText.LineHeight = fontSize * 1.18;
         }
 
-        if (!AreClose(_lastMaxWidth, settings.MaxWidth))
+        _lastPlacementRect = target;
+        _lastPlacement = placement;
+    }
+
+    private void ReapplyLockedPlacement()
+    {
+        if (_lastPlacementRect.IsEmpty)
         {
-            TranslationText.MaxWidth = settings.MaxWidth;
-            _lastMaxWidth = settings.MaxWidth;
+            return;
         }
 
-        if (!AreClose(_lastOpacity, settings.Opacity))
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == nint.Zero)
         {
-            Opacity = _recordingSafeMode ? 1 : settings.Opacity;
-            _lastOpacity = settings.Opacity;
+            return;
         }
 
-        if (!AreClose(_lastBackgroundOpacity, settings.BackgroundOpacity))
+        SetWindowPos(
+            hwnd,
+            HwndTopmost,
+            _lastPlacementRect.X,
+            _lastPlacementRect.Y,
+            _lastPlacementRect.Width,
+            _lastPlacementRect.Height,
+            SwpNoActivate);
+    }
+
+    private void LockDipSize(CaptureRegion physical)
+    {
+        var dpi = ScreenCoordinates.GetDpiForRegion(physical);
+        _lockedWidth = Math.Max(80, physical.Width / dpi.DpiScaleX);
+        _lockedHeight = Math.Max(48, physical.Height / dpi.DpiScaleY);
+        SizeToContent = SizeToContent.Manual;
+        MinWidth = _lockedWidth;
+        MaxWidth = _lockedWidth;
+        MinHeight = _lockedHeight;
+        MaxHeight = _lockedHeight;
+        Width = _lockedWidth;
+        Height = _lockedHeight;
+
+        var dipLeft = physical.X / dpi.DpiScaleX;
+        var dipTop = physical.Y / dpi.DpiScaleY;
+        Left = dipLeft;
+        Top = dipTop;
+    }
+
+    private static CaptureRegion GetPlacementRect(CaptureRegion region, string placement)
+    {
+        var width = Math.Max(80, region.Width);
+        var height = Math.Max(48, region.Height);
+        var left = region.X;
+        var top = region.Y;
+
+        if (placement == "below")
         {
-            var minimumOpacity = _recordingSafeMode ? 0.88 : 0.35;
-            var backgroundOpacity = Math.Clamp(settings.BackgroundOpacity, minimumOpacity, 1);
-            var alpha = (byte)Math.Clamp(backgroundOpacity * 255, 90, 255);
-            OverlayChrome.Background = new SolidColorBrush(Color.FromArgb(alpha, 2, 6, 23));
-            _lastBackgroundOpacity = settings.BackgroundOpacity;
+            top = region.Y + region.Height + PhysicalGap;
+        }
+        else if (placement == "above")
+        {
+            top = region.Y - height - PhysicalGap;
         }
 
-        OverlayChrome.CornerRadius = _recordingSafeMode ? new CornerRadius(4) : new CornerRadius(8);
-        OverlayChrome.Padding = _recordingSafeMode ? new Thickness(22, 14, 22, 14) : new Thickness(24, 16, 24, 16);
-
-        _positionUnlocked = settings.PositionUnlocked;
-        DragHandle.Visibility = _positionUnlocked ? Visibility.Visible : Visibility.Collapsed;
-        TranslationText.Margin = _positionUnlocked ? new Thickness(0, 28, 0, 0) : new Thickness(0);
-        Cursor = Cursors.Arrow;
-
-        if (_lastClickThrough != settings.ClickThrough)
+        var screen = ScreenCoordinates.GetVirtualScreenPhysical();
+        if (top < screen.Y || top + height > screen.Y + screen.Height)
         {
-            _lastClickThrough = settings.ClickThrough;
-            ApplyExtendedStyles();
-        }
-    }
-
-    private void UpdatePosition(CaptureRegion region, OverlaySettings settings, DpiScale dpi)
-    {
-        var overlaySize = GetOverlaySize();
-        var captureRect = ToDipRect(region, dpi);
-        var screen = GetCurrentMonitorRect(region, dpi);
-        var location = settings.UsesSmartPlacement
-            ? ChooseSmartLocation(settings, captureRect, overlaySize, screen)
-            : ChooseLockedLocation(settings, captureRect, overlaySize, screen);
-        var adjustedLocation = ClampToScreen(location, overlaySize, screen);
-
-        Left = adjustedLocation.X;
-        Top = adjustedLocation.Y;
-    }
-
-    private Size GetOverlaySize()
-    {
-        var width = ActualWidth;
-        var height = ActualHeight;
-
-        if (width > 0 && height > 0)
-        {
-            return new Size(width, height);
+            top = region.Y;
         }
 
-        Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        return DesiredSize;
-    }
-
-    private static Rect GetCurrentMonitorRect(CaptureRegion region, DpiScale dpi)
-    {
-        var nativeRect = region.IsEmpty
-            ? new NativeRect(0, 0, 1, 1)
-            : new NativeRect(region.X, region.Y, region.X + region.Width, region.Y + region.Height);
-
-        var monitor = MonitorFromRect(ref nativeRect, MonitorDefaultToNearest);
-        var monitorInfo = new MonitorInfo
+        if (left < screen.X)
         {
-            Size = Marshal.SizeOf<MonitorInfo>()
-        };
-
-        if (monitor != nint.Zero && GetMonitorInfo(monitor, ref monitorInfo))
-        {
-            return ToDipRect(monitorInfo.WorkArea, dpi);
+            left = screen.X;
         }
 
-        return new Rect(
-            SystemParameters.VirtualScreenLeft,
-            SystemParameters.VirtualScreenTop,
-            SystemParameters.VirtualScreenWidth,
-            SystemParameters.VirtualScreenHeight);
-    }
-
-    private static Rect ToDipRect(CaptureRegion region, DpiScale dpi)
-    {
-        if (region.IsEmpty)
+        if (left + width > screen.X + screen.Width)
         {
-            return Rect.Empty;
+            left = Math.Max(screen.X, screen.X + screen.Width - width);
         }
 
-        return new Rect(
-            region.X / dpi.DpiScaleX,
-            region.Y / dpi.DpiScaleY,
-            region.Width / dpi.DpiScaleX,
-            region.Height / dpi.DpiScaleY);
-    }
-
-    private static Rect ToDipRect(NativeRect rect, DpiScale dpi)
-    {
-        return new Rect(
-            rect.Left / dpi.DpiScaleX,
-            rect.Top / dpi.DpiScaleY,
-            (rect.Right - rect.Left) / dpi.DpiScaleX,
-            (rect.Bottom - rect.Top) / dpi.DpiScaleY);
-    }
-
-    private static Point ChooseSmartLocation(OverlaySettings settings, Rect captureRect, Size overlaySize, Rect screen)
-    {
-        var location = ChoosePresetLocation(settings, captureRect, overlaySize, screen);
-        return AvoidCaptureRegion(location, overlaySize, captureRect, screen);
-    }
-
-    private static Point ChooseLockedLocation(OverlaySettings settings, Rect captureRect, Size overlaySize, Rect screen)
-    {
-        return ChoosePresetLocation(settings, captureRect, overlaySize, screen);
-    }
-
-    private static Point ChoosePresetLocation(OverlaySettings settings, Rect captureRect, Size overlaySize, Rect screen)
-    {
-        return settings.PositionPreset.ToLowerInvariant() switch
-        {
-            "top-center" => new Point(
-                screen.Left + ((screen.Width - overlaySize.Width) / 2),
-                screen.Top + ScreenMargin),
-            "middle-center" => new Point(
-                screen.Left + ((screen.Width - overlaySize.Width) / 2),
-                screen.Top + ((screen.Height - overlaySize.Height) / 2)),
-            "bottom-center" => new Point(
-                screen.Left + ((screen.Width - overlaySize.Width) / 2),
-                screen.Bottom - overlaySize.Height - SubtitleBottomMargin),
-            "above-ocr" => ChooseRegionLocation(captureRect, overlaySize, screen, aboveRegion: true),
-            "below-ocr" => ChooseRegionLocation(captureRect, overlaySize, screen, aboveRegion: false),
-            "custom" when settings.CustomLeft.HasValue && settings.CustomTop.HasValue =>
-                new Point(settings.CustomLeft.Value, settings.CustomTop.Value),
-            _ => new Point(
-                screen.Left + ((screen.Width - overlaySize.Width) / 2),
-                screen.Bottom - overlaySize.Height - SubtitleBottomMargin)
-        };
-    }
-
-    private static Point ChooseRegionLocation(Rect captureRect, Size overlaySize, Rect screen, bool aboveRegion)
-    {
-        if (captureRect.IsEmpty)
-        {
-            return new Point(
-                screen.Left + ((screen.Width - overlaySize.Width) / 2),
-                screen.Bottom - overlaySize.Height - SubtitleBottomMargin);
-        }
-
-        var left = captureRect.Left + ((captureRect.Width - overlaySize.Width) / 2);
-        var top = aboveRegion
-            ? captureRect.Top - overlaySize.Height - RegionMargin
-            : captureRect.Bottom + RegionMargin;
-
-        return new Point(left, top);
-    }
-
-    private static Point AvoidCaptureRegion(Point desiredLocation, Size overlaySize, Rect captureRect, Rect screen)
-    {
-        var clamped = ClampToScreen(desiredLocation, overlaySize, screen);
-        if (captureRect.IsEmpty || !BuildRect(clamped, overlaySize).IntersectsWith(captureRect))
-        {
-            return clamped;
-        }
-
-        var candidates = new[]
-        {
-            new Point(captureRect.Left + ((captureRect.Width - overlaySize.Width) / 2), captureRect.Top - overlaySize.Height - RegionMargin),
-            new Point(captureRect.Left + ((captureRect.Width - overlaySize.Width) / 2), captureRect.Bottom + RegionMargin),
-            new Point(screen.Left + ((screen.Width - overlaySize.Width) / 2), screen.Top + ScreenMargin),
-            new Point(screen.Left + ((screen.Width - overlaySize.Width) / 2), screen.Bottom - overlaySize.Height - ScreenMargin)
-        };
-
-        foreach (var candidate in candidates.Select(point => ClampToScreen(point, overlaySize, screen)))
-        {
-            if (!BuildRect(candidate, overlaySize).IntersectsWith(captureRect))
-            {
-                return candidate;
-            }
-        }
-
-        return clamped;
-    }
-
-    private static Point ClampToScreen(Point point, Size overlaySize, Rect screen)
-    {
-        var minLeft = screen.Left + ScreenMargin;
-        var maxLeft = screen.Right - overlaySize.Width - ScreenMargin;
-        var minTop = screen.Top + ScreenMargin;
-        var maxTop = screen.Bottom - overlaySize.Height - ScreenMargin;
-
-        var left = maxLeft < minLeft
-            ? minLeft
-            : Math.Clamp(point.X, minLeft, maxLeft);
-        var top = maxTop < minTop
-            ? minTop
-            : Math.Clamp(point.Y, minTop, maxTop);
-
-        return new Point(left, top);
-    }
-
-    private static Rect BuildRect(Point point, Size size)
-    {
-        return new Rect(point, size);
+        return new CaptureRegion(left, top, width, height);
     }
 
     private void ApplyExtendedStyles()
     {
+        if (_stylesApplied)
+        {
+            return;
+        }
+
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == nint.Zero)
         {
             return;
         }
 
-        var extendedStyle = GetWindowLong(handle, GwlExStyle);
-        extendedStyle |= WsExToolWindow;
+        var extendedStyle = GetWindowLongPtr(handle, GwlExStyle);
+        extendedStyle = (nint)((long)extendedStyle | WsExToolWindow | WsExNoActivate | WsExTransparent);
+        SetWindowLongPtr(handle, GwlExStyle, extendedStyle);
+        _stylesApplied = true;
+    }
 
-        if (!_recordingSafeMode)
+    private void ExcludeFromCapture()
+    {
+        if (_affinityApplied)
         {
-            extendedStyle |= WsExLayered;
+            return;
         }
 
-        if (_lastClickThrough == true)
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == nint.Zero)
         {
-            extendedStyle |= WsExTransparent;
-        }
-        else
-        {
-            extendedStyle &= ~WsExTransparent;
+            return;
         }
 
-        SetWindowLong(handle, GwlExStyle, extendedStyle);
+        if (SetWindowDisplayAffinity(handle, WdaExcludeFromCapture))
+        {
+            _affinityApplied = true;
+        }
     }
 
-    private static bool AreClose(double left, double right)
+    private static nint GetWindowLongPtr(nint hwnd, int index)
     {
-        return Math.Abs(left - right) < 0.001;
+        return nint.Size == 8
+            ? GetWindowLongPtr64(hwnd, index)
+            : GetWindowLong32(hwnd, index);
     }
+
+    private static nint SetWindowLongPtr(nint hwnd, int index, nint newStyle)
+    {
+        return nint.Size == 8
+            ? SetWindowLongPtr64(hwnd, index, newStyle)
+            : SetWindowLong32(hwnd, index, (int)newStyle);
+    }
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+    private static extern nint GetWindowLong32(nint hwnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
+    private static extern nint GetWindowLongPtr64(nint hwnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+    private static extern nint SetWindowLong32(nint hwnd, int index, int newStyle);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr")]
+    private static extern nint SetWindowLongPtr64(nint hwnd, int index, nint newStyle);
 
     [DllImport("user32.dll")]
-    private static extern int GetWindowLong(nint hwnd, int index);
+    private static extern bool SetWindowPos(
+        nint hwnd,
+        nint insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
 
     [DllImport("user32.dll")]
-    private static extern int SetWindowLong(nint hwnd, int index, int newStyle);
-
-    [DllImport("user32.dll")]
-    private static extern nint MonitorFromRect(ref NativeRect rect, int flags);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo monitorInfo);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativeRect(int left, int top, int right, int bottom)
-    {
-        public int Left = left;
-        public int Top = top;
-        public int Right = right;
-        public int Bottom = bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private struct MonitorInfo
-    {
-        public int Size;
-        public NativeRect Monitor;
-        public NativeRect WorkArea;
-        public int Flags;
-    }
+    private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
 }
