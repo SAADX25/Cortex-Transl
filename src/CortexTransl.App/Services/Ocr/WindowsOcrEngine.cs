@@ -23,7 +23,7 @@ public sealed class WindowsOcrEngine : IOcrEngine
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var preset = bitmap.Height < 140 ? "small-text" : "normal";
+        var preset = bitmap.Height < 220 ? "small-text" : "normal";
         using var preprocessed = OcrImagePreprocessor.Preprocess(bitmap, preset);
         using var softwareBitmap = await ToSoftwareBitmapAsync(preprocessed.Bitmap, cancellationToken);
 
@@ -34,7 +34,7 @@ public sealed class WindowsOcrEngine : IOcrEngine
         }
 
         var result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
-        return ToOcrResult(result, preprocessed.Scale, bitmap.Width, bitmap.Height);
+        return ToOcrResult(result, preprocessed.Scale, bitmap.Width, bitmap.Height, sourceLanguage);
     }
 
     private static OcrEngine? CreateEngine(string sourceLanguage)
@@ -57,7 +57,12 @@ public sealed class WindowsOcrEngine : IOcrEngine
         }
     }
 
-    private static OcrResult ToOcrResult(Windows.Media.Ocr.OcrResult result, double scale, int width, int height)
+    private static OcrResult ToOcrResult(
+        Windows.Media.Ocr.OcrResult result,
+        double scale,
+        int width,
+        int height,
+        string sourceLanguage)
     {
         var blocks = new List<OcrTextBlock>();
         var safeScale = scale <= 0 ? 1 : scale;
@@ -65,7 +70,7 @@ public sealed class WindowsOcrEngine : IOcrEngine
         foreach (var line in result.Lines)
         {
             var text = TextNormalizer.Normalize(line.Text);
-            if (string.IsNullOrWhiteSpace(text) || line.Words.Count == 0)
+            if (!DialogueTextAssembler.IsUsefulLine(text) || line.Words.Count == 0)
             {
                 continue;
             }
@@ -83,10 +88,10 @@ public sealed class WindowsOcrEngine : IOcrEngine
             }
         }
 
-        var fullText = blocks.Count > 0
-            ? string.Join(Environment.NewLine, blocks.Select(block => block.Text))
-            : result.Text.Trim();
-
+        var assembled = new OcrResult(
+            string.Join(Environment.NewLine, blocks.Select(block => block.Text)),
+            blocks);
+        var fullText = DialogueTextAssembler.Assemble(assembled, sourceLanguage);
         return new OcrResult(fullText, blocks);
     }
 

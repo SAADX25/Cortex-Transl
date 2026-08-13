@@ -50,6 +50,18 @@ public static class TextSimilarity
         return DialogueStability.Changed;
     }
 
+    public static bool LooksComplete(string text)
+    {
+        var value = TextNormalizer.Normalize(text);
+        if (value.Length < 2)
+        {
+            return false;
+        }
+
+        var last = value[^1];
+        return last is '.' or '!' or '?' or '…' or '。' or '！' or '？' or '」' or '』';
+    }
+
     private static bool IsProgressiveChange(string first, string second)
     {
         var shorter = first.Length <= second.Length ? first : second;

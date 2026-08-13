@@ -16,8 +16,8 @@ namespace CortexTransl.App.Views;
 
 public partial class MainWindow : Window
 {
-    private const double CompactWidth = 400;
-    private const double CompactHeight = 540;
+    private const double CompactWidth = 540;
+    private const double CompactHeight = 560;
     private static readonly TimeSpan F10DebounceInterval = TimeSpan.FromMilliseconds(280);
 
     private readonly GlobalHotkeyService _hotkeyService = new();

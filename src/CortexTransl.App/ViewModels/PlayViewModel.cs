@@ -31,8 +31,10 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private string _overlayPlacement = "cover";
     private string _translationMode = "dialogue";
     private double _overlayBackgroundOpacity = 0.88;
+    private string _overlayTextSize = "medium";
+    private string _overlayTextColor = "white";
     private bool _minimizeDuringPlay = true;
-    private double _autoTranslateIntervalMs = 500;
+    private double _autoTranslateIntervalMs = 320;
     private string _profileName = string.Empty;
     private GameProfile? _selectedProfile;
     private string _originalText = string.Empty;
@@ -41,6 +43,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private IReadOnlyList<TranslatedBlock> _lastBlocks = [];
     private bool _isPlaying;
     private bool _isBusy;
+    private string _selectedNavPage = "play";
     private CancellationTokenSource? _playCts;
 
     public PlayViewModel(
@@ -64,8 +67,11 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
         SelectRegionCommand = new AsyncRelayCommand(_ => SelectRegionAsync());
         TogglePlayCommand = new AsyncRelayCommand(_ => TogglePlayAsync(), _ => CanStartOrStop());
-        SaveProfileCommand = new AsyncRelayCommand(_ => SaveProfileAsync(), _ => !SelectedRegion.IsEmpty);
-        LoadProfileCommand = new RelayCommand(_ => LoadSelectedProfile(), _ => SelectedProfile is not null);
+        SaveProfileCommand = new AsyncRelayCommand(_ => SaveProfileAsync(), _ => CanSaveProfile());
+        UsePresetCommand = new RelayCommand(parameter => UsePreset(parameter as GameProfile), parameter => parameter is GameProfile);
+        DeletePresetCommand = new AsyncRelayCommand(
+            parameter => DeletePresetAsync(parameter as GameProfile),
+            parameter => parameter is GameProfile);
     }
 
     public event EventHandler? MinimizeRequested;
@@ -95,6 +101,14 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         new("above", "Above dialogue box")
     ];
 
+    public IReadOnlyList<OptionItem> OverlayTextSizeOptions { get; } =
+    [
+        new("small", "Small"),
+        new("medium", "Medium"),
+        new("large", "Large"),
+        new("xlarge", "Extra large")
+    ];
+
     public ObservableCollection<GameProfile> Profiles { get; } = [];
 
     public AsyncRelayCommand SelectRegionCommand { get; }
@@ -103,7 +117,9 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     public AsyncRelayCommand SaveProfileCommand { get; }
 
-    public RelayCommand LoadProfileCommand { get; }
+    public RelayCommand UsePresetCommand { get; }
+
+    public AsyncRelayCommand DeletePresetCommand { get; }
 
     public CaptureRegion SelectedRegion
     {
@@ -245,6 +261,121 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
     }
 
+    public string OverlayTextSize
+    {
+        get => _overlayTextSize;
+        set
+        {
+            var normalized = NormalizeOverlayTextSize(value);
+            if (SetProperty(ref _overlayTextSize, normalized))
+            {
+                OnPropertyChanged(nameof(OverlayFontScale));
+                OnPropertyChanged(nameof(OverlayPreviewFontSize));
+                OnPropertyChanged(nameof(OverlayTextSizeLabel));
+                _ = SaveSettingsAsync();
+                RefreshOverlay();
+            }
+        }
+    }
+
+    public double OverlayFontScale => OverlayTextSize switch
+    {
+        "small" => 0.78,
+        "large" => 1.24,
+        "xlarge" => 1.52,
+        _ => 1.0
+    };
+
+    public double OverlayPreviewFontSize => OverlayTextSize switch
+    {
+        "small" => 15,
+        "large" => 23,
+        "xlarge" => 28,
+        _ => 19
+    };
+
+    public string OverlayTextSizeLabel => OverlayTextSizeOptions
+        .FirstOrDefault(item => item.Id == OverlayTextSize)?.Name ?? "Medium";
+
+    public string OverlayTextColor
+    {
+        get => _overlayTextColor;
+        set
+        {
+            var normalized = OverlayTextColors.Normalize(value);
+            if (SetProperty(ref _overlayTextColor, normalized))
+            {
+                OnPropertyChanged(nameof(OverlayTextColorLabel));
+                _ = SaveSettingsAsync();
+                RefreshOverlay();
+            }
+        }
+    }
+
+    public string OverlayTextColorLabel => OverlayTextColors.Label(OverlayTextColor);
+
+    public string OverlayPreviewText => "This is how the translation looks over the game.";
+
+    public string SelectedNavPage
+    {
+        get => _selectedNavPage;
+        set
+        {
+            if (SetProperty(ref _selectedNavPage, value))
+            {
+                RaiseNavProperties();
+            }
+        }
+    }
+
+    public bool IsNavPlay
+    {
+        get => _selectedNavPage == "play";
+        set { if (value) SelectedNavPage = "play"; }
+    }
+
+    public bool IsNavKey
+    {
+        get => _selectedNavPage == "key";
+        set { if (value) SelectedNavPage = "key"; }
+    }
+
+    public bool IsNavRegion
+    {
+        get => _selectedNavPage == "region";
+        set { if (value) SelectedNavPage = "region"; }
+    }
+
+    public bool IsNavLook
+    {
+        get => _selectedNavPage == "look";
+        set { if (value) SelectedNavPage = "look"; }
+    }
+
+    public bool IsNavPresets
+    {
+        get => _selectedNavPage == "presets";
+        set { if (value) SelectedNavPage = "presets"; }
+    }
+
+    public string NavPageTitle => _selectedNavPage switch
+    {
+        "key" => "Translation key",
+        "region" => "Capture region",
+        "look" => "Overlay look",
+        "presets" => "Presets",
+        _ => "Play"
+    };
+
+    public string NavPageSubtitle => _selectedNavPage switch
+    {
+        "key" => "DeepL API and game language.",
+        "region" => "Choose what the overlay covers.",
+        "look" => "Size, color, position, and opacity.",
+        "presets" => "Save a game setup and tap to load it.",
+        _ => "Start translation and check the last capture."
+    };
+
     public bool MinimizeDuringPlay
     {
         get => _minimizeDuringPlay;
@@ -259,22 +390,26 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     public bool SuppressAutoCapture { get; set; }
 
+    public bool HasProfiles => Profiles.Count > 0;
+
+    public bool HasNoProfiles => Profiles.Count == 0;
+
     public string ProfileName
     {
         get => _profileName;
-        set => SetProperty(ref _profileName, value);
+        set
+        {
+            if (SetProperty(ref _profileName, value))
+            {
+                SaveProfileCommand.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     public GameProfile? SelectedProfile
     {
         get => _selectedProfile;
-        set
-        {
-            if (SetProperty(ref _selectedProfile, value))
-            {
-                LoadProfileCommand.RaiseCanExecuteChanged();
-            }
-        }
+        set => SetProperty(ref _selectedProfile, value);
     }
 
     public string OriginalText
@@ -331,9 +466,11 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
         _translationMode = NormalizeTranslationMode(settings.TranslationMode);
         _overlayBackgroundOpacity = settings.OverlayBackgroundOpacity <= 0 ? 0.88 : settings.OverlayBackgroundOpacity;
+        _overlayTextSize = NormalizeOverlayTextSize(settings.OverlayTextSize);
+        _overlayTextColor = OverlayTextColors.Normalize(settings.OverlayTextColor);
         _minimizeDuringPlay = settings.MinimizeDuringPlay;
-        _autoTranslateIntervalMs = settings.AutoTranslateIntervalMs <= 0 || settings.AutoTranslateIntervalMs >= 900
-            ? 500
+        _autoTranslateIntervalMs = settings.AutoTranslateIntervalMs <= 0 || settings.AutoTranslateIntervalMs >= 500
+            ? 320
             : settings.AutoTranslateIntervalMs;
         _useDeepLFreeApi = settings.UseDeepLFreeApi;
         _profileName = settings.ProfileName;
@@ -356,6 +493,12 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectRegionButtonLabel));
         OnPropertyChanged(nameof(OverlayBackgroundOpacity));
         OnPropertyChanged(nameof(OverlayOpacityPercent));
+        OnPropertyChanged(nameof(OverlayTextSize));
+        OnPropertyChanged(nameof(OverlayFontScale));
+        OnPropertyChanged(nameof(OverlayPreviewFontSize));
+        OnPropertyChanged(nameof(OverlayTextSizeLabel));
+        OnPropertyChanged(nameof(OverlayTextColor));
+        OnPropertyChanged(nameof(OverlayTextColorLabel));
         OnPropertyChanged(nameof(MinimizeDuringPlay));
         OnPropertyChanged(nameof(UseDeepLFreeApi));
         OnPropertyChanged(nameof(ProfileName));
@@ -365,9 +508,13 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedRegion));
         OnPropertyChanged(nameof(SelectedRegionDisplay));
         OnPropertyChanged(nameof(HasRegion));
+        OnPropertyChanged(nameof(HasProfiles));
+        OnPropertyChanged(nameof(HasNoProfiles));
         OnPropertyChanged(nameof(SessionBadgeText));
         SaveProfileCommand.RaiseCanExecuteChanged();
         TogglePlayCommand.RaiseCanExecuteChanged();
+
+        SelectedNavPage = !HasApiKey ? "key" : !HasRegion ? "region" : "play";
 
         StatusMessage = HasApiKey
             ? SelectedRegion.IsEmpty
@@ -445,12 +592,14 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
         if (!HasApiKey)
         {
+            SelectedNavPage = "key";
             StatusMessage = "Paste a DeepL API key first.";
             return;
         }
 
         if (SelectedRegion.IsEmpty)
         {
+            SelectedNavPage = "region";
             StatusMessage = "Select the dialogue region first.";
             return;
         }
@@ -483,7 +632,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         try
         {
             await RunTurnAsync(token);
-            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Clamp(_autoTranslateIntervalMs, 350, 800)));
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Clamp(_autoTranslateIntervalMs, 280, 450)));
             while (await timer.WaitForNextTickAsync(token))
             {
                 await RunTurnAsync(token);
@@ -566,7 +715,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     private OverlaySettings CreateOverlaySettings()
     {
-        return new OverlaySettings(OverlayPlacement, OverlayBackgroundOpacity, TranslationMode);
+        return new OverlaySettings(OverlayPlacement, OverlayBackgroundOpacity, TranslationMode, OverlayFontScale, OverlayTextColor);
     }
 
     private void PinOverlay()
@@ -598,30 +747,31 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
     }
 
+    private bool CanSaveProfile()
+    {
+        return HasRegion && !string.IsNullOrWhiteSpace(ProfileName);
+    }
+
     private async Task SaveProfileAsync()
     {
         try
         {
-            var name = string.IsNullOrWhiteSpace(ProfileName)
-                ? $"Game {DateTime.Now:yyyy-MM-dd HH:mm}"
-                : ProfileName.Trim();
-
-            var profile = new GameProfile
+            if (!CanSaveProfile())
             {
-                Name = name,
-                Region = SelectedRegion,
-                SourceLanguage = SourceLanguage,
-                TargetLanguage = TargetLanguage,
-                OcrEngine = "windows",
-                TranslationProvider = "deepl"
-            };
+                StatusMessage = SelectedRegion.IsEmpty
+                    ? "Select the dialogue region first."
+                    : "Type a game name, then save the preset.";
+                return;
+            }
 
+            var name = ProfileName.Trim();
+            var profile = CreateProfileFromCurrent(name);
             await _profileRepository.SaveAsync(profile);
             ProfileName = name;
             await RefreshProfilesAsync();
             SelectedProfile = Profiles.FirstOrDefault(item => item.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             await SaveSettingsAsync();
-            StatusMessage = $"Saved \"{name}\".";
+            StatusMessage = $"Preset \"{name}\" is ready. Tap it next time to use this look.";
         }
         catch (Exception ex)
         {
@@ -629,39 +779,124 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void LoadSelectedProfile()
+    private void UsePreset(GameProfile? profile)
     {
-        if (SelectedProfile is null)
+        if (profile is null)
         {
             return;
         }
 
-        SelectedRegion = SelectedProfile.Region;
-        SourceLanguage = SelectedProfile.SourceLanguage;
-        ProfileName = SelectedProfile.Name;
+        ApplyPreset(profile);
+        StatusMessage = $"Using \"{profile.Name}\". Press F8 to start.";
+    }
+
+    private async Task DeletePresetAsync(GameProfile? profile)
+    {
+        if (profile is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _profileRepository.DeleteAsync(profile.Id);
+            if (SelectedProfile?.Id == profile.Id)
+            {
+                SelectedProfile = null;
+            }
+
+            await RefreshProfilesAsync();
+            StatusMessage = $"Removed \"{profile.Name}\".";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = ex.Message;
+        }
+    }
+
+    private GameProfile CreateProfileFromCurrent(string name)
+    {
+        return new GameProfile
+        {
+            Name = name,
+            Region = SelectedRegion,
+            SourceLanguage = SourceLanguage,
+            TargetLanguage = TargetLanguage,
+            TranslationMode = TranslationMode,
+            OverlayPlacement = OverlayPlacement,
+            OverlayBackgroundOpacity = OverlayBackgroundOpacity,
+            OverlayTextSize = OverlayTextSize,
+            OverlayTextColor = OverlayTextColor,
+            OcrEngine = "windows",
+            TranslationProvider = "deepl"
+        };
+    }
+
+    private void ApplyPreset(GameProfile profile)
+    {
+        _selectedRegion = profile.Region;
+        _sourceLanguage = string.IsNullOrWhiteSpace(profile.SourceLanguage) ? "en" : profile.SourceLanguage;
+        _translationMode = NormalizeTranslationMode(profile.TranslationMode);
+        _overlayPlacement = NormalizeOverlayPlacement(profile.OverlayPlacement);
+        _overlayBackgroundOpacity = profile.OverlayBackgroundOpacity <= 0 ? 0.88 : Math.Clamp(profile.OverlayBackgroundOpacity, 0.6, 0.95);
+        _overlayTextSize = NormalizeOverlayTextSize(profile.OverlayTextSize);
+        _overlayTextColor = OverlayTextColors.Normalize(profile.OverlayTextColor);
+        _profileName = profile.Name;
         _pipeline.Reset();
+        _lastBlocks = [];
+
+        OnPropertyChanged(nameof(SelectedRegion));
+        OnPropertyChanged(nameof(SelectedRegionDisplay));
+        OnPropertyChanged(nameof(HasRegion));
+        OnPropertyChanged(nameof(SessionBadgeText));
+        OnPropertyChanged(nameof(SourceLanguage));
+        OnPropertyChanged(nameof(TranslationMode));
+        OnPropertyChanged(nameof(IsListMode));
+        OnPropertyChanged(nameof(IsDialogueMode));
+        OnPropertyChanged(nameof(RegionHint));
+        OnPropertyChanged(nameof(RegionSectionTitle));
+        OnPropertyChanged(nameof(SelectRegionButtonLabel));
+        OnPropertyChanged(nameof(OverlayPlacement));
+        OnPropertyChanged(nameof(OverlayBackgroundOpacity));
+        OnPropertyChanged(nameof(OverlayOpacityPercent));
+        OnPropertyChanged(nameof(OverlayTextSize));
+        OnPropertyChanged(nameof(OverlayFontScale));
+        OnPropertyChanged(nameof(OverlayPreviewFontSize));
+        OnPropertyChanged(nameof(OverlayTextSizeLabel));
+        OnPropertyChanged(nameof(OverlayTextColor));
+        OnPropertyChanged(nameof(OverlayTextColorLabel));
+        OnPropertyChanged(nameof(ProfileName));
+        SaveProfileCommand.RaiseCanExecuteChanged();
+        TogglePlayCommand.RaiseCanExecuteChanged();
+
+        SelectedProfile = profile;
+        _ = RefreshProfilesAsync();
         if (IsPlaying)
         {
             PinOverlay();
         }
 
         _ = SaveSettingsAsync();
-        StatusMessage = $"Loaded \"{SelectedProfile.Name}\".";
     }
 
     private async Task RefreshProfilesAsync(CancellationToken cancellationToken = default)
     {
-        var selectedName = SelectedProfile?.Name;
+        var selectedId = SelectedProfile?.Id;
+        var selectedName = SelectedProfile?.Name ?? ProfileName;
         Profiles.Clear();
         foreach (var profile in await _profileRepository.GetAllAsync(cancellationToken))
         {
+            profile.IsActive = selectedId is > 0
+                ? profile.Id == selectedId
+                : profile.Name.Equals(selectedName, StringComparison.OrdinalIgnoreCase);
             Profiles.Add(profile);
         }
 
-        if (!string.IsNullOrWhiteSpace(selectedName))
-        {
-            SelectedProfile = Profiles.FirstOrDefault(item => item.Name.Equals(selectedName, StringComparison.OrdinalIgnoreCase));
-        }
+        SelectedProfile = Profiles.FirstOrDefault(item => item.IsActive);
+        OnPropertyChanged(nameof(HasProfiles));
+        OnPropertyChanged(nameof(HasNoProfiles));
+        UsePresetCommand.RaiseCanExecuteChanged();
+        DeletePresetCommand.RaiseCanExecuteChanged();
     }
 
     private async Task SaveSettingsAsync()
@@ -674,6 +909,8 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             SourceLanguage = _sourceLanguage,
             OverlayPlacement = _overlayPlacement,
             OverlayBackgroundOpacity = _overlayBackgroundOpacity,
+            OverlayTextSize = _overlayTextSize,
+            OverlayTextColor = _overlayTextColor,
             MinimizeDuringPlay = _minimizeDuringPlay,
             AutoTranslateIntervalMs = _autoTranslateIntervalMs,
             RegionX = _selectedRegion.X,
@@ -697,9 +934,31 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         };
     }
 
+    private static string NormalizeOverlayTextSize(string? size)
+    {
+        return size?.Trim().ToLowerInvariant() switch
+        {
+            "small" => "small",
+            "large" => "large",
+            "xlarge" => "xlarge",
+            _ => "medium"
+        };
+    }
+
     private static string NormalizeTranslationMode(string? mode)
     {
         return mode?.Trim().ToLowerInvariant() == "list" ? "list" : "dialogue";
+    }
+
+    private void RaiseNavProperties()
+    {
+        OnPropertyChanged(nameof(IsNavPlay));
+        OnPropertyChanged(nameof(IsNavKey));
+        OnPropertyChanged(nameof(IsNavRegion));
+        OnPropertyChanged(nameof(IsNavLook));
+        OnPropertyChanged(nameof(IsNavPresets));
+        OnPropertyChanged(nameof(NavPageTitle));
+        OnPropertyChanged(nameof(NavPageSubtitle));
     }
 
     public void Dispose()

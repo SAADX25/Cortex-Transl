@@ -7,4 +7,6 @@ public interface IGameProfileRepository
     Task<IReadOnlyList<GameProfile>> GetAllAsync(CancellationToken cancellationToken = default);
 
     Task SaveAsync(GameProfile profile, CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(long id, CancellationToken cancellationToken = default);
 }

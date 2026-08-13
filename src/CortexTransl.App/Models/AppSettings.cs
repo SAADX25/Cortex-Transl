@@ -29,4 +29,8 @@ public sealed class AppSettings
     public string ProfileName { get; set; } = string.Empty;
 
     public string TranslationMode { get; set; } = "dialogue";
+
+    public string OverlayTextSize { get; set; } = "medium";
+
+    public string OverlayTextColor { get; set; } = "white";
 }

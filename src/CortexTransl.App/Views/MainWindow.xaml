@@ -1,10 +1,11 @@
 <Window x:Class="CortexTransl.App.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:utils="clr-namespace:CortexTransl.App.Utils"
         Title="Cortex Transl"
-        Width="500"
-        Height="780"
-        MinWidth="360"
+        Width="620"
+        Height="700"
+        MinWidth="520"
         MinHeight="480"
         WindowStartupLocation="CenterScreen"
         FlowDirection="LeftToRight"
@@ -12,62 +13,92 @@
         Background="{DynamicResource AppBackgroundBrush}">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <utils:StringEqualsConverter x:Key="StringEquals" />
+        <utils:OverlayColorBrushConverter x:Key="OverlayColorBrush" />
     </Window.Resources>
 
     <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-        <Border Grid.Row="0"
-                Background="{DynamicResource HeaderBackgroundBrush}"
-                BorderBrush="{DynamicResource CardBorderBrush}"
-                BorderThickness="0,0,0,1"
-                Padding="20,16">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock Text="Cortex Transl"
-                               FontSize="22"
-                               FontWeight="Bold"
-                               Foreground="{DynamicResource PrimaryTextBrush}" />
-                    <TextBlock Text="Game dialogue and on-screen lists"
-                               Style="{StaticResource HintText}"
-                               Margin="0,4,0,0" />
+        <Border Grid.Column="0" Style="{StaticResource NavRail}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top">
+                    <TextBlock Text="Cortex" Style="{StaticResource NavBrand}" />
+                    <RadioButton Style="{StaticResource NavItem}"
+                                 IsChecked="{Binding IsNavPlay, Mode=TwoWay}">
+                        <StackPanel>
+                            <TextBlock Text="&#xE768;" Style="{StaticResource NavItemIcon}" />
+                            <TextBlock Text="Play" Style="{StaticResource NavItemLabel}" />
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton Style="{StaticResource NavItem}"
+                                 IsChecked="{Binding IsNavKey, Mode=TwoWay}">
+                        <StackPanel>
+                            <TextBlock Text="&#xE192;" Style="{StaticResource NavItemIcon}" />
+                            <TextBlock Text="API key" Style="{StaticResource NavItemLabel}" />
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton Style="{StaticResource NavItem}"
+                                 IsChecked="{Binding IsNavRegion, Mode=TwoWay}">
+                        <StackPanel>
+                            <TextBlock Text="&#xE7A8;" Style="{StaticResource NavItemIcon}" />
+                            <TextBlock Text="Region" Style="{StaticResource NavItemLabel}" />
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton Style="{StaticResource NavItem}"
+                                 IsChecked="{Binding IsNavLook, Mode=TwoWay}">
+                        <StackPanel>
+                            <TextBlock Text="&#xE790;" Style="{StaticResource NavItemIcon}" />
+                            <TextBlock Text="Look" Style="{StaticResource NavItemLabel}" />
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton Style="{StaticResource NavItem}"
+                                 IsChecked="{Binding IsNavPresets, Mode=TwoWay}">
+                        <StackPanel>
+                            <TextBlock Text="&#xE8F1;" Style="{StaticResource NavItemIcon}" />
+                            <TextBlock Text="Presets" Style="{StaticResource NavItemLabel}" />
+                        </StackPanel>
+                    </RadioButton>
                 </StackPanel>
-                <Border Grid.Column="1">
-                    <Border.Style>
-                        <Style TargetType="Border" BasedOn="{StaticResource SessionBadge}">
-                            <Setter Property="Background" Value="{DynamicResource BadgeSetupBackgroundBrush}" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsPlaying}" Value="True">
-                                    <Setter Property="Background" Value="{DynamicResource BadgeLiveBackgroundBrush}" />
-                                </DataTrigger>
-                                <MultiDataTrigger>
-                                    <MultiDataTrigger.Conditions>
-                                        <Condition Binding="{Binding IsPlaying}" Value="False" />
-                                        <Condition Binding="{Binding HasApiKey}" Value="True" />
-                                        <Condition Binding="{Binding HasRegion}" Value="True" />
-                                    </MultiDataTrigger.Conditions>
-                                    <Setter Property="Background" Value="{DynamicResource BadgeReadyBackgroundBrush}" />
-                                </MultiDataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <TextBlock Text="{Binding SessionBadgeText}"
-                               FontSize="12"
-                               FontWeight="SemiBold">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Foreground" Value="{DynamicResource BadgeSetupTextBrush}" />
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="{DynamicResource HeaderBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="18,14">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="{Binding NavPageTitle}"
+                                   FontSize="20"
+                                   FontWeight="Bold"
+                                   Foreground="{DynamicResource PrimaryTextBrush}" />
+                        <TextBlock Text="{Binding NavPageSubtitle}"
+                                   Style="{StaticResource HintText}"
+                                   Margin="0,4,0,0" />
+                    </StackPanel>
+                    <Border Grid.Column="1">
+                        <Border.Style>
+                            <Style TargetType="Border" BasedOn="{StaticResource SessionBadge}">
+                                <Setter Property="Background" Value="{DynamicResource BadgeSetupBackgroundBrush}" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsPlaying}" Value="True">
-                                        <Setter Property="Foreground" Value="{DynamicResource BadgeLiveTextBrush}" />
+                                        <Setter Property="Background" Value="{DynamicResource BadgeLiveBackgroundBrush}" />
                                     </DataTrigger>
                                     <MultiDataTrigger>
                                         <MultiDataTrigger.Conditions>
@@ -75,201 +106,446 @@
                                             <Condition Binding="{Binding HasApiKey}" Value="True" />
                                             <Condition Binding="{Binding HasRegion}" Value="True" />
                                         </MultiDataTrigger.Conditions>
-                                        <Setter Property="Foreground" Value="{DynamicResource BadgeReadyTextBrush}" />
+                                        <Setter Property="Background" Value="{DynamicResource BadgeReadyBackgroundBrush}" />
                                     </MultiDataTrigger>
                                 </Style.Triggers>
                             </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Border>
-            </Grid>
-        </Border>
+                        </Border.Style>
+                        <TextBlock Text="{Binding SessionBadgeText}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{DynamicResource BadgeSetupTextBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                            <Setter Property="Foreground" Value="{DynamicResource BadgeLiveTextBrush}" />
+                                        </DataTrigger>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding IsPlaying}" Value="False" />
+                                                <Condition Binding="{Binding HasApiKey}" Value="True" />
+                                                <Condition Binding="{Binding HasRegion}" Value="True" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Foreground" Value="{DynamicResource BadgeReadyTextBrush}" />
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Border>
+                </Grid>
+            </Border>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16,16,10,16">
-            <StackPanel>
-                <Border Style="{StaticResource CardBorder}">
-                    <StackPanel>
-                        <TextBlock Text="Setup" Style="{StaticResource CardTitle}" />
-                        <TextBlock Text="API key" Style="{StaticResource InputLabel}" />
-                        <PasswordBox x:Name="ApiKeyPasswordBox"
-                                     PasswordChanged="ApiKeyPasswordBox_PasswordChanged" />
-                        <TextBlock Text="{Binding ApiKeyStatusText}"
-                                   Style="{StaticResource HintText}"
-                                   Margin="0,6,0,10" />
-                        <CheckBox Content="Use DeepL Free API"
-                                  IsChecked="{Binding UseDeepLFreeApi, Mode=TwoWay}"
-                                  Margin="0,0,0,14" />
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="12" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16,16,10,16">
+                <Grid>
+                    <StackPanel Visibility="{Binding IsNavPlay, Converter={StaticResource BoolToVis}}">
+                        <Border Style="{StaticResource CardBorder}" Padding="16,14">
                             <StackPanel>
-                                <TextBlock Text="Game language" Style="{StaticResource InputLabel}" />
-                                <ComboBox ItemsSource="{Binding SourceLanguageOptions}"
-                                          DisplayMemberPath="Name"
-                                          SelectedValuePath="Id"
-                                          SelectedValue="{Binding SourceLanguage, Mode=TwoWay}" />
+                                <Button Command="{Binding TogglePlayCommand}"
+                                        Style="{StaticResource PlayToggleButton}"
+                                        ToolTip="F8">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding PlayButtonLabel}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="14"
+                                                   VerticalAlignment="Center" />
+                                        <Border Style="{StaticResource KeyCap}" Margin="10,0,0,0" Padding="6,1">
+                                            <TextBlock Text="F8" Style="{StaticResource KeyCapText}" />
+                                        </Border>
+                                    </StackPanel>
+                                </Button>
+                                <CheckBox Content="Hide this window while translating"
+                                          IsChecked="{Binding MinimizeDuringPlay, Mode=TwoWay}"
+                                          Margin="0,12,0,0" />
                             </StackPanel>
-                            <StackPanel Grid.Column="2">
-                                <TextBlock Text="Mode" Style="{StaticResource InputLabel}" />
-                                <ComboBox ItemsSource="{Binding TranslationModeOptions}"
-                                          DisplayMemberPath="Name"
-                                          SelectedValuePath="Id"
-                                          SelectedValue="{Binding TranslationMode, Mode=TwoWay}" />
+                        </Border>
+
+                        <Border Style="{StaticResource CardBorder}">
+                            <Expander Header="Last capture"
+                                      Foreground="{DynamicResource PrimaryTextBrush}">
+                                <StackPanel Margin="0,12,0,0">
+                                    <TextBlock Text="Original" Style="{StaticResource InputLabel}" />
+                                    <TextBox Text="{Binding OriginalText, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             MinHeight="48"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Margin="0,0,0,10" />
+                                    <TextBlock Text="Arabic" Style="{StaticResource InputLabel}" />
+                                    <TextBox Text="{Binding TranslatedText, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             MinHeight="52"
+                                             FlowDirection="RightToLeft"
+                                             VerticalScrollBarVisibility="Auto" />
+                                </StackPanel>
+                            </Expander>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Visibility="{Binding IsNavKey, Converter={StaticResource BoolToVis}}">
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel>
+                                <TextBlock Text="API key" Style="{StaticResource InputLabel}" />
+                                <PasswordBox x:Name="ApiKeyPasswordBox"
+                                             PasswordChanged="ApiKeyPasswordBox_PasswordChanged" />
+                                <TextBlock Text="{Binding ApiKeyStatusText}"
+                                           Style="{StaticResource HintText}"
+                                           Margin="0,6,0,10" />
+                                <CheckBox Content="Use DeepL Free API"
+                                          IsChecked="{Binding UseDeepLFreeApi, Mode=TwoWay}"
+                                          Margin="0,0,0,14" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Game language" Style="{StaticResource InputLabel}" />
+                                        <ComboBox ItemsSource="{Binding SourceLanguageOptions}"
+                                                  DisplayMemberPath="Name"
+                                                  SelectedValuePath="Id"
+                                                  SelectedValue="{Binding SourceLanguage, Mode=TwoWay}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Mode" Style="{StaticResource InputLabel}" />
+                                        <ComboBox ItemsSource="{Binding TranslationModeOptions}"
+                                                  DisplayMemberPath="Name"
+                                                  SelectedValuePath="Id"
+                                                  SelectedValue="{Binding TranslationMode, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="Arabic overlay. Use borderless windowed mode in the game."
+                                           Style="{StaticResource HintText}"
+                                           Margin="0,10,0,0" />
                             </StackPanel>
-                        </Grid>
-                        <TextBlock Text="Arabic overlay. Use borderless windowed mode in the game."
-                                   Style="{StaticResource HintText}"
-                                   Margin="0,10,0,0" />
+                        </Border>
                     </StackPanel>
-                </Border>
 
-                <Border Style="{StaticResource CardBorder}">
-                    <StackPanel>
-                        <Grid Margin="0,0,0,10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{Binding RegionSectionTitle}"
-                                       Style="{StaticResource CardTitle}"
-                                       Margin="0" />
-                            <Border Grid.Column="1" Style="{StaticResource MetricChip}">
-                                <TextBlock Text="{Binding SelectedRegionDisplay}"
-                                           FontSize="12"
-                                           FontWeight="SemiBold"
-                                           Foreground="{DynamicResource PrimaryTextBrush}" />
-                            </Border>
-                        </Grid>
-                        <Button Content="{Binding SelectRegionButtonLabel}"
-                                Command="{Binding SelectRegionCommand}"
-                                Style="{StaticResource StretchButton}"
-                                ToolTip="F9" />
-                        <TextBlock Text="{Binding RegionHint}"
-                                   Style="{StaticResource HintText}"
-                                   Margin="0,8,0,0" />
+                    <StackPanel Visibility="{Binding IsNavRegion, Converter={StaticResource BoolToVis}}">
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding RegionSectionTitle}"
+                                               Style="{StaticResource CardTitle}"
+                                               Margin="0" />
+                                    <Border Grid.Column="1" Style="{StaticResource MetricChip}">
+                                        <TextBlock Text="{Binding SelectedRegionDisplay}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource PrimaryTextBrush}" />
+                                    </Border>
+                                </Grid>
+                                <Button Content="{Binding SelectRegionButtonLabel}"
+                                        Command="{Binding SelectRegionCommand}"
+                                        Style="{StaticResource StretchButton}"
+                                        ToolTip="F9" />
+                                <TextBlock Text="{Binding RegionHint}"
+                                           Style="{StaticResource HintText}"
+                                           Margin="0,8,0,0" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
-                </Border>
 
-                <Border Style="{StaticResource CardBorder}" Padding="16,14">
-                    <StackPanel>
-                        <Button Command="{Binding TogglePlayCommand}"
-                                Style="{StaticResource PlayToggleButton}"
-                                ToolTip="F8">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{Binding PlayButtonLabel}"
-                                           FontWeight="SemiBold"
-                                           FontSize="14"
-                                           VerticalAlignment="Center" />
-                                <Border Style="{StaticResource KeyCap}" Margin="10,0,0,0" Padding="6,1">
-                                    <TextBlock Text="F8" Style="{StaticResource KeyCapText}" />
+                    <StackPanel Visibility="{Binding IsNavLook, Converter={StaticResource BoolToVis}}">
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel>
+                                <TextBlock Text="The preview matches the overlay players see in-game."
+                                           Style="{StaticResource HintText}"
+                                           Margin="0,0,0,12" />
+
+                                <Border CornerRadius="12"
+                                        Padding="2"
+                                        Background="{DynamicResource LookInsetBrush}"
+                                        BorderBrush="{DynamicResource CardBorderBrush}"
+                                        BorderThickness="1"
+                                        Margin="0,0,0,12">
+                                    <Grid MinHeight="108">
+                                        <Border Margin="16,18"
+                                                CornerRadius="8"
+                                                Padding="16,14"
+                                                Background="#E0020617"
+                                                BorderBrush="#66FFFFFF"
+                                                BorderThickness="1"
+                                                Opacity="{Binding OverlayBackgroundOpacity}">
+                                            <TextBlock Text="{Binding OverlayPreviewText}"
+                                                       FontSize="{Binding OverlayPreviewFontSize}"
+                                                       FontWeight="SemiBold"
+                                                       FontFamily="Segoe UI, Tahoma, Arial"
+                                                       Foreground="{Binding OverlayTextColor, Converter={StaticResource OverlayColorBrush}}"
+                                                       TextAlignment="Center"
+                                                       TextWrapping="Wrap"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center" />
+                                        </Border>
+                                        <Border HorizontalAlignment="Left"
+                                                VerticalAlignment="Top"
+                                                Margin="10,8,0,0"
+                                                Background="#66111827"
+                                                CornerRadius="6"
+                                                Padding="7,2">
+                                            <TextBlock Text="In-game overlay"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#CBD5E1" />
+                                        </Border>
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource LookRow}">
+                                    <StackPanel>
+                                        <Grid Margin="0,0,0,10">
+                                            <TextBlock Text="Size" Style="{StaticResource LookRowLabel}" />
+                                            <TextBlock Text="{Binding OverlayTextSizeLabel}"
+                                                       Style="{StaticResource LookValueLabel}"
+                                                       HorizontalAlignment="Right" />
+                                        </Grid>
+                                        <UniformGrid Columns="4">
+                                            <RadioButton GroupName="OverlayTextSize"
+                                                         Style="{StaticResource OverlaySizeChoice}"
+                                                         IsChecked="{Binding OverlayTextSize, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=small}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Aa"
+                                                               FontSize="12"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{Binding OverlayTextColor, Converter={StaticResource OverlayColorBrush}}"
+                                                               HorizontalAlignment="Center" />
+                                                    <TextBlock Text="S"
+                                                               Style="{StaticResource HintText}"
+                                                               HorizontalAlignment="Center"
+                                                               Margin="0,4,0,0" />
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton GroupName="OverlayTextSize"
+                                                         Style="{StaticResource OverlaySizeChoice}"
+                                                         IsChecked="{Binding OverlayTextSize, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=medium}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Aa"
+                                                               FontSize="15"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{Binding OverlayTextColor, Converter={StaticResource OverlayColorBrush}}"
+                                                               HorizontalAlignment="Center" />
+                                                    <TextBlock Text="M"
+                                                               Style="{StaticResource HintText}"
+                                                               HorizontalAlignment="Center"
+                                                               Margin="0,4,0,0" />
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton GroupName="OverlayTextSize"
+                                                         Style="{StaticResource OverlaySizeChoice}"
+                                                         IsChecked="{Binding OverlayTextSize, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=large}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Aa"
+                                                               FontSize="18"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{Binding OverlayTextColor, Converter={StaticResource OverlayColorBrush}}"
+                                                               HorizontalAlignment="Center" />
+                                                    <TextBlock Text="L"
+                                                               Style="{StaticResource HintText}"
+                                                               HorizontalAlignment="Center"
+                                                               Margin="0,4,0,0" />
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton GroupName="OverlayTextSize"
+                                                         Style="{StaticResource OverlaySizeChoice}"
+                                                         Margin="0"
+                                                         IsChecked="{Binding OverlayTextSize, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=xlarge}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Aa"
+                                                               FontSize="21"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{Binding OverlayTextColor, Converter={StaticResource OverlayColorBrush}}"
+                                                               HorizontalAlignment="Center" />
+                                                    <TextBlock Text="XL"
+                                                               Style="{StaticResource HintText}"
+                                                               HorizontalAlignment="Center"
+                                                               Margin="0,4,0,0" />
+                                                </StackPanel>
+                                            </RadioButton>
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource LookRow}">
+                                    <StackPanel>
+                                        <Grid Margin="0,0,0,10">
+                                            <TextBlock Text="Color" Style="{StaticResource LookRowLabel}" />
+                                            <TextBlock Text="{Binding OverlayTextColorLabel}"
+                                                       Style="{StaticResource LookValueLabel}"
+                                                       HorizontalAlignment="Right" />
+                                        </Grid>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                                            <RadioButton GroupName="OverlayTextColor"
+                                                         Style="{StaticResource OverlayColorChoice}"
+                                                         ToolTip="White"
+                                                         IsChecked="{Binding OverlayTextColor, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=white}">
+                                                <Border Style="{StaticResource OverlayColorDot}" Background="#FFFFFF" />
+                                            </RadioButton>
+                                            <RadioButton GroupName="OverlayTextColor"
+                                                         Style="{StaticResource OverlayColorChoice}"
+                                                         ToolTip="Cream"
+                                                         IsChecked="{Binding OverlayTextColor, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=cream}">
+                                                <Border Style="{StaticResource OverlayColorDot}" Background="#F5E6C8" />
+                                            </RadioButton>
+                                            <RadioButton GroupName="OverlayTextColor"
+                                                         Style="{StaticResource OverlayColorChoice}"
+                                                         ToolTip="Gold"
+                                                         IsChecked="{Binding OverlayTextColor, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=gold}">
+                                                <Border Style="{StaticResource OverlayColorDot}" Background="#FDE68A" />
+                                            </RadioButton>
+                                            <RadioButton GroupName="OverlayTextColor"
+                                                         Style="{StaticResource OverlayColorChoice}"
+                                                         ToolTip="Mint"
+                                                         IsChecked="{Binding OverlayTextColor, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=mint}">
+                                                <Border Style="{StaticResource OverlayColorDot}" Background="#BBF7D0" />
+                                            </RadioButton>
+                                            <RadioButton GroupName="OverlayTextColor"
+                                                         Style="{StaticResource OverlayColorChoice}"
+                                                         ToolTip="Sky"
+                                                         Margin="0"
+                                                         IsChecked="{Binding OverlayTextColor, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=sky}">
+                                                <Border Style="{StaticResource OverlayColorDot}" Background="#BFDBFE" />
+                                            </RadioButton>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource LookRow}"
+                                        Visibility="{Binding IsDialogueMode, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel>
+                                        <TextBlock Text="Position" Style="{StaticResource LookRowLabel}" Margin="0,0,0,10" />
+                                        <UniformGrid Columns="3">
+                                            <RadioButton GroupName="OverlayPlacement"
+                                                         Style="{StaticResource OverlayPlacementChoice}"
+                                                         IsChecked="{Binding OverlayPlacement, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=cover}">
+                                                <TextBlock Text="Cover" Style="{StaticResource ChoiceChipText}" />
+                                            </RadioButton>
+                                            <RadioButton GroupName="OverlayPlacement"
+                                                         Style="{StaticResource OverlayPlacementChoice}"
+                                                         IsChecked="{Binding OverlayPlacement, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=below}">
+                                                <TextBlock Text="Below" Style="{StaticResource ChoiceChipText}" />
+                                            </RadioButton>
+                                            <RadioButton GroupName="OverlayPlacement"
+                                                         Style="{StaticResource OverlayPlacementChoice}"
+                                                         Margin="0"
+                                                         IsChecked="{Binding OverlayPlacement, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=above}">
+                                                <TextBlock Text="Above" Style="{StaticResource ChoiceChipText}" />
+                                            </RadioButton>
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource LookRow}" Margin="0">
+                                    <StackPanel>
+                                        <Grid Margin="0,0,0,8">
+                                            <TextBlock Text="Opacity" Style="{StaticResource LookRowLabel}" />
+                                            <TextBlock Text="{Binding OverlayOpacityPercent}"
+                                                       Style="{StaticResource LookValueLabel}"
+                                                       HorizontalAlignment="Right" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource LookSlider}"
+                                                Value="{Binding OverlayBackgroundOpacity, Mode=TwoWay}" />
+                                    </StackPanel>
                                 </Border>
                             </StackPanel>
-                        </Button>
-                        <StackPanel Margin="0,14,0,0"
-                                    Visibility="{Binding IsDialogueMode, Converter={StaticResource BoolToVis}}">
-                            <TextBlock Text="Overlay placement" Style="{StaticResource InputLabel}" />
-                            <ComboBox ItemsSource="{Binding OverlayPlacementOptions}"
-                                      DisplayMemberPath="Name"
-                                      SelectedValuePath="Id"
-                                      SelectedValue="{Binding OverlayPlacement, Mode=TwoWay}" />
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Visibility="{Binding IsNavPresets, Converter={StaticResource BoolToVis}}">
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel>
+                                <TextBlock Text="Save the region, language, size, and color. Tap a preset to use it."
+                                           Style="{StaticResource HintText}"
+                                           Margin="0,0,0,10" />
+                                <TextBlock Text="Name" Style="{StaticResource InputLabel}" />
+                                <TextBox Text="{Binding ProfileName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         Margin="0,0,0,8" />
+                                <Button Content="Save preset"
+                                        Command="{Binding SaveProfileCommand}"
+                                        Style="{StaticResource StretchButton}"
+                                        Margin="0,0,0,12" />
+                                <TextBlock Text="No presets yet. Set the look, select a region, type the game name, then save."
+                                           Style="{StaticResource HintText}"
+                                           Visibility="{Binding HasNoProfiles, Converter={StaticResource BoolToVis}}" />
+                                <ItemsControl ItemsSource="{Binding Profiles}"
+                                              Visibility="{Binding HasProfiles, Converter={StaticResource BoolToVis}}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource PresetCard}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Button Grid.Column="0"
+                                                            Command="{Binding DataContext.UsePresetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource PresetUseButton}">
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding Name}"
+                                                                       FontWeight="SemiBold"
+                                                                       FontSize="13"
+                                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                                       TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding Summary}"
+                                                                       Style="{StaticResource HintText}"
+                                                                       Margin="0,4,0,0" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Button Grid.Column="1"
+                                                            Content="Delete"
+                                                            Command="{Binding DataContext.DeletePresetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}"
+                                                            Style="{StaticResource PresetDeleteButton}" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+
+            <Border Grid.Row="2"
+                    Background="{DynamicResource FooterBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="0,1,0,0"
+                    Padding="16,12">
+                <StackPanel>
+                    <TextBlock Text="{Binding StatusMessage}"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               FontSize="13"
+                               TextWrapping="Wrap" />
+                    <WrapPanel Margin="0,10,0,0">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,14,4">
+                            <Border Style="{StaticResource KeyCap}">
+                                <TextBlock Text="F8" Style="{StaticResource KeyCapText}" />
+                            </Border>
+                            <TextBlock Text="Start / Stop" Style="{StaticResource HotkeyLabel}" />
                         </StackPanel>
-                        <Grid Margin="0,12,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Overlay opacity" Style="{StaticResource InputLabel}" Margin="0" />
-                            <TextBlock Grid.Column="1"
-                                       Text="{Binding OverlayOpacityPercent}"
-                                       Style="{StaticResource HintText}"
-                                       VerticalAlignment="Center" />
-                        </Grid>
-                        <Slider Minimum="0.6"
-                                Maximum="0.95"
-                                TickFrequency="0.01"
-                                IsSnapToTickEnabled="True"
-                                Value="{Binding OverlayBackgroundOpacity, Mode=TwoWay}"
-                                Margin="0,6,0,10" />
-                        <CheckBox Content="Hide this window while translating"
-                                  IsChecked="{Binding MinimizeDuringPlay, Mode=TwoWay}" />
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource CardBorder}">
-                    <StackPanel>
-                        <TextBlock Text="Preview" Style="{StaticResource CardTitle}" />
-                        <TextBlock Text="Original" Style="{StaticResource InputLabel}" />
-                        <TextBox Text="{Binding OriginalText, Mode=OneWay}"
-                                 IsReadOnly="True"
-                                 TextWrapping="Wrap"
-                                 MinHeight="56"
-                                 VerticalScrollBarVisibility="Auto"
-                                 Margin="0,0,0,10" />
-                        <TextBlock Text="Arabic" Style="{StaticResource InputLabel}" />
-                        <TextBox Text="{Binding TranslatedText, Mode=OneWay}"
-                                 IsReadOnly="True"
-                                 TextWrapping="Wrap"
-                                 MinHeight="64"
-                                 FlowDirection="RightToLeft"
-                                 VerticalScrollBarVisibility="Auto" />
-                    </StackPanel>
-                </Border>
-
-                <Expander Header="Saved games" Foreground="{DynamicResource PrimaryTextBrush}">
-                    <StackPanel Margin="0,12,0,0">
-                        <TextBlock Text="Name" Style="{StaticResource InputLabel}" />
-                        <TextBox Text="{Binding ProfileName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 Margin="0,0,0,8" />
-                        <Button Content="Save current region"
-                                Command="{Binding SaveProfileCommand}"
-                                Style="{StaticResource StretchButton}"
-                                Margin="0,0,0,8" />
-                        <ComboBox ItemsSource="{Binding Profiles}"
-                                  SelectedItem="{Binding SelectedProfile}"
-                                  DisplayMemberPath="Name"
-                                  Margin="0,0,0,8" />
-                        <Button Content="Load"
-                                Command="{Binding LoadProfileCommand}"
-                                Style="{StaticResource StretchButton}" />
-                    </StackPanel>
-                </Expander>
-            </StackPanel>
-        </ScrollViewer>
-
-        <Border Grid.Row="2"
-                Background="{DynamicResource FooterBackgroundBrush}"
-                BorderBrush="{DynamicResource CardBorderBrush}"
-                BorderThickness="0,1,0,0"
-                Padding="16,12">
-            <StackPanel>
-                <TextBlock Text="{Binding StatusMessage}"
-                           Foreground="{DynamicResource PrimaryTextBrush}"
-                           FontSize="13"
-                           TextWrapping="Wrap" />
-                <WrapPanel Margin="0,10,0,0">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,14,4">
-                        <Border Style="{StaticResource KeyCap}">
-                            <TextBlock Text="F8" Style="{StaticResource KeyCapText}" />
-                        </Border>
-                        <TextBlock Text="Start / Stop" Style="{StaticResource HotkeyLabel}" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,14,4">
-                        <Border Style="{StaticResource KeyCap}">
-                            <TextBlock Text="F9" Style="{StaticResource KeyCapText}" />
-                        </Border>
-                        <TextBlock Text="Region" Style="{StaticResource HotkeyLabel}" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                        <Border Style="{StaticResource KeyCap}">
-                            <TextBlock Text="F10" Style="{StaticResource KeyCapText}" />
-                        </Border>
-                        <TextBlock Text="Menu" Style="{StaticResource HotkeyLabel}" />
-                    </StackPanel>
-                </WrapPanel>
-            </StackPanel>
-        </Border>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,14,4">
+                            <Border Style="{StaticResource KeyCap}">
+                                <TextBlock Text="F9" Style="{StaticResource KeyCapText}" />
+                            </Border>
+                            <TextBlock Text="Region" Style="{StaticResource HotkeyLabel}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <Border Style="{StaticResource KeyCap}">
+                                <TextBlock Text="F10" Style="{StaticResource KeyCapText}" />
+                            </Border>
+                            <TextBlock Text="Menu" Style="{StaticResource HotkeyLabel}" />
+                        </StackPanel>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Window>

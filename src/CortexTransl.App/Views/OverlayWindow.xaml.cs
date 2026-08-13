@@ -1,5 +1,6 @@
 using CortexTransl.App.Models;
 using CortexTransl.App.Services.Capture;
+using CortexTransl.App.Utils;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -29,6 +30,9 @@ public partial class OverlayWindow : Window
     private bool _affinityApplied;
     private bool _isListMode;
     private double _labelOpacity = 0.88;
+    private double _fontScale = 1.0;
+    private SolidColorBrush _textBrush = Brushes.White;
+    private Color _lastTextColor = Colors.Transparent;
     private bool _allowClose;
 
     public OverlayWindow()
@@ -49,7 +53,10 @@ public partial class OverlayWindow : Window
         }
 
         ApplyChrome(settings);
+        _fontScale = settings.NormalizedFontScale;
+        ApplyTextColor(settings.NormalizedTextColor);
         Place(region, settings.IsListMode ? "cover" : settings.NormalizedPlacement);
+        ApplyFontSize();
         ApplyExtendedStyles();
         ExcludeFromCapture();
         ReapplyLockedPlacement();
@@ -97,7 +104,7 @@ public partial class OverlayWindow : Window
             var top = block.Bounds.Y / dpi.DpiScaleY;
             var width = Math.Max(28, block.Bounds.Width / dpi.DpiScaleX);
             var height = Math.Max(14, block.Bounds.Height / dpi.DpiScaleY);
-            var fontSize = Math.Clamp(height * 0.72, 9, 18);
+            var fontSize = Math.Clamp(height * 0.72 * _fontScale, 8, 24);
 
             var chip = new Border
             {
@@ -109,7 +116,7 @@ public partial class OverlayWindow : Window
                 Child = new TextBlock
                 {
                     Text = block.TranslatedText,
-                    Foreground = Brushes.White,
+                    Foreground = _textBrush,
                     FontSize = fontSize,
                     FontWeight = FontWeights.SemiBold,
                     FontFamily = new FontFamily("Segoe UI, Tahoma, Arial"),
@@ -186,17 +193,28 @@ public partial class OverlayWindow : Window
         LabelCanvas.Children.Clear();
         OverlayChrome.Visibility = Visibility.Visible;
 
-        if (Math.Abs(_lastOpacity - opacity) < 0.001)
+        if (Math.Abs(_lastOpacity - opacity) >= 0.001)
+        {
+            var fill = new SolidColorBrush(Color.FromRgb(2, 6, 23));
+            fill.Freeze();
+            OverlayChrome.Background = fill;
+            Background = fill;
+            Opacity = opacity;
+            _lastOpacity = opacity;
+        }
+    }
+
+    private void ApplyTextColor(string colorId)
+    {
+        var color = OverlayTextColors.ToColor(colorId);
+        if (_lastTextColor == color)
         {
             return;
         }
 
-        var fill = new SolidColorBrush(Color.FromRgb(2, 6, 23));
-        fill.Freeze();
-        OverlayChrome.Background = fill;
-        Background = fill;
-        Opacity = opacity;
-        _lastOpacity = opacity;
+        _textBrush = OverlayTextColors.ToBrush(colorId);
+        TranslationText.Foreground = _textBrush;
+        _lastTextColor = color;
     }
 
     private void Place(CaptureRegion region, string placement)
@@ -208,15 +226,21 @@ public partial class OverlayWindow : Window
         SetWindowPos(hwnd, HwndTopmost, target.X, target.Y, target.Width, target.Height, SwpNoActivate);
         ExcludeFromCapture();
 
-        if (!_isListMode && (target != _lastPlacementRect || placement != _lastPlacement))
-        {
-            var fontSize = Math.Clamp(_lockedHeight * 0.28, 16, 32);
-            TranslationText.FontSize = fontSize;
-            TranslationText.LineHeight = fontSize * 1.18;
-        }
-
         _lastPlacementRect = target;
         _lastPlacement = placement;
+        ApplyFontSize();
+    }
+
+    private void ApplyFontSize()
+    {
+        if (_isListMode || _lockedHeight <= 0)
+        {
+            return;
+        }
+
+        var fontSize = Math.Clamp(_lockedHeight * 0.28 * _fontScale, 12, 48);
+        TranslationText.FontSize = fontSize;
+        TranslationText.LineHeight = fontSize * 1.18;
     }
 
     private void ReapplyLockedPlacement()

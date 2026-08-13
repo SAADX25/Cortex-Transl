@@ -11,6 +11,8 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
 {
     private const int MaximumRequestBytes = 128 * 1024;
     private const int MaximumBatchSize = 40;
+    private const string GameDialogueContext =
+        "Spoken video-game story dialogue. Translate into natural Arabic a player can read quickly. Keep character names and every clause. Do not add extra sentences.";
     private readonly TranslationProviderSettings _settings;
     private readonly HttpClient _httpClient;
 
@@ -111,7 +113,8 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
             Text = texts,
             TargetLanguage = MapLanguage(targetLanguage, isTarget: true),
             SplitSentences = "0",
-            PreserveFormatting = true
+            PreserveFormatting = true,
+            Context = GameDialogueContext
         };
 
         if (!sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
@@ -249,6 +252,9 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
 
         [JsonPropertyName("preserve_formatting")]
         public bool PreserveFormatting { get; init; } = true;
+
+        [JsonPropertyName("context")]
+        public string? Context { get; init; }
     }
 
     private sealed class DeepLTranslateResponse

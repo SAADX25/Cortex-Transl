@@ -45,6 +45,9 @@
     <SolidColorBrush x:Key="BadgeSetupBackgroundBrush" Color="#1C1917" />
     <SolidColorBrush x:Key="BadgeSetupTextBrush" Color="#FDBA74" />
     <SolidColorBrush x:Key="AccentSoftBrush" Color="#1E3A5F" />
+    <SolidColorBrush x:Key="LookInsetBrush" Color="#0B1220" />
+    <SolidColorBrush x:Key="LookRowBrush" Color="#0F172A" />
+    <SolidColorBrush x:Key="NavRailBackgroundBrush" Color="#080E1A" />
 
     <SolidColorBrush x:Key="SurfaceBrush" Color="#0B1120" />
     <SolidColorBrush x:Key="CardBrush" Color="#111827" />

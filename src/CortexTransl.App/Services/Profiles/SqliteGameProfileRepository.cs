@@ -22,9 +22,11 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT Id, Name, RegionX, RegionY, RegionWidth, RegionHeight,
-                   SourceLanguage, TargetLanguage, OcrEngine, TranslationProvider
+                   SourceLanguage, TargetLanguage, OcrEngine, TranslationProvider,
+                   TranslationMode, OverlayPlacement, OverlayBackgroundOpacity,
+                   OverlayTextSize, OverlayTextColor
             FROM GameProfiles
-            ORDER BY Name COLLATE NOCASE;
+            ORDER BY UpdatedUtc DESC, Name COLLATE NOCASE;
             """;
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -38,7 +40,12 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
                 SourceLanguage = reader.GetString(6),
                 TargetLanguage = reader.GetString(7),
                 OcrEngine = reader.GetString(8),
-                TranslationProvider = reader.GetString(9)
+                TranslationProvider = reader.GetString(9),
+                TranslationMode = reader.IsDBNull(10) ? "dialogue" : reader.GetString(10),
+                OverlayPlacement = reader.IsDBNull(11) ? "cover" : reader.GetString(11),
+                OverlayBackgroundOpacity = reader.IsDBNull(12) ? 0.88 : reader.GetDouble(12),
+                OverlayTextSize = reader.IsDBNull(13) ? "medium" : reader.GetString(13),
+                OverlayTextColor = reader.IsDBNull(14) ? "white" : reader.GetString(14)
             });
         }
 
@@ -55,9 +62,13 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO GameProfiles
-                (Name, RegionX, RegionY, RegionWidth, RegionHeight, SourceLanguage, TargetLanguage, OcrEngine, TranslationProvider, CreatedUtc, UpdatedUtc)
+                (Name, RegionX, RegionY, RegionWidth, RegionHeight, SourceLanguage, TargetLanguage,
+                 OcrEngine, TranslationProvider, TranslationMode, OverlayPlacement,
+                 OverlayBackgroundOpacity, OverlayTextSize, OverlayTextColor, CreatedUtc, UpdatedUtc)
             VALUES
-                ($name, $x, $y, $width, $height, $sourceLanguage, $targetLanguage, $ocrEngine, $translationProvider, $now, $now)
+                ($name, $x, $y, $width, $height, $sourceLanguage, $targetLanguage,
+                 $ocrEngine, $translationProvider, $translationMode, $overlayPlacement,
+                 $overlayOpacity, $overlayTextSize, $overlayTextColor, $now, $now)
             ON CONFLICT(Name)
             DO UPDATE SET
                 RegionX = excluded.RegionX,
@@ -68,6 +79,11 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
                 TargetLanguage = excluded.TargetLanguage,
                 OcrEngine = excluded.OcrEngine,
                 TranslationProvider = excluded.TranslationProvider,
+                TranslationMode = excluded.TranslationMode,
+                OverlayPlacement = excluded.OverlayPlacement,
+                OverlayBackgroundOpacity = excluded.OverlayBackgroundOpacity,
+                OverlayTextSize = excluded.OverlayTextSize,
+                OverlayTextColor = excluded.OverlayTextColor,
                 UpdatedUtc = excluded.UpdatedUtc;
             """;
         command.Parameters.AddWithValue("$name", profile.Name);
@@ -79,8 +95,24 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
         command.Parameters.AddWithValue("$targetLanguage", profile.TargetLanguage);
         command.Parameters.AddWithValue("$ocrEngine", profile.OcrEngine);
         command.Parameters.AddWithValue("$translationProvider", profile.TranslationProvider);
+        command.Parameters.AddWithValue("$translationMode", profile.TranslationMode);
+        command.Parameters.AddWithValue("$overlayPlacement", profile.OverlayPlacement);
+        command.Parameters.AddWithValue("$overlayOpacity", profile.OverlayBackgroundOpacity);
+        command.Parameters.AddWithValue("$overlayTextSize", profile.OverlayTextSize);
+        command.Parameters.AddWithValue("$overlayTextColor", profile.OverlayTextColor);
         command.Parameters.AddWithValue("$now", now);
 
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task DeleteAsync(long id, CancellationToken cancellationToken = default)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM GameProfiles WHERE Id = $id";
+        command.Parameters.AddWithValue("$id", id);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

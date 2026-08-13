@@ -18,7 +18,6 @@ public sealed class TranslationPipeline
     private string? _lastOriginalText;
     private string? _lastTranslatedText;
     private string? _pendingText;
-    private int _pendingHits;
     private IReadOnlyList<TranslatedBlock> _lastBlocks = [];
 
     public TranslationPipeline(
@@ -82,7 +81,6 @@ public sealed class TranslationPipeline
         _lastOriginalText = null;
         _lastTranslatedText = null;
         _pendingText = null;
-        _pendingHits = 0;
         _lastBlocks = [];
     }
 
@@ -93,7 +91,7 @@ public sealed class TranslationPipeline
         string targetLanguage,
         CancellationToken cancellationToken)
     {
-        var originalText = TextNormalizer.Normalize(ocrResult.Text);
+        var originalText = DialogueTextAssembler.Assemble(ocrResult, sourceLanguage);
         if (string.IsNullOrWhiteSpace(originalText))
         {
             return KeepLast(fingerprint, "Waiting for text.");
@@ -168,7 +166,7 @@ public sealed class TranslationPipeline
                     : "No labels found. Select the list or icon names.");
         }
 
-        var originalText = string.Join(Environment.NewLine, ocrResult.Blocks.Select(block => block.Text));
+        var originalText = DialogueTextAssembler.Assemble(ocrResult, sourceLanguage);
         if (_lastBlocks.Count == ocrResult.Blocks.Count && ShouldHoldLastTranslation(originalText))
         {
             _lastFingerprint = fingerprint;
@@ -279,6 +277,11 @@ public sealed class TranslationPipeline
             return false;
         }
 
+        if (DialogueTextAssembler.LooksLikeOcrGlitch(_lastOriginalText ?? string.Empty, originalText))
+        {
+            return true;
+        }
+
         var decision = TextSimilarity.Classify(_lastOriginalText ?? string.Empty, originalText);
         if (decision == DialogueStability.Unchanged)
         {
@@ -286,7 +289,7 @@ public sealed class TranslationPipeline
             return true;
         }
 
-        if (decision == DialogueStability.Changed)
+        if (decision == DialogueStability.Changed || TextSimilarity.LooksComplete(originalText))
         {
             ClearPending();
             return false;
@@ -295,18 +298,11 @@ public sealed class TranslationPipeline
         if (_pendingText is not null
             && TextSimilarity.Classify(_pendingText, originalText) == DialogueStability.Unchanged)
         {
-            _pendingHits++;
-            if (_pendingHits >= 2)
-            {
-                ClearPending();
-                return false;
-            }
-
-            return true;
+            ClearPending();
+            return false;
         }
 
         _pendingText = originalText;
-        _pendingHits = 1;
         return true;
     }
 
@@ -330,7 +326,6 @@ public sealed class TranslationPipeline
     private void ClearPending()
     {
         _pendingText = null;
-        _pendingHits = 0;
     }
 
     private void Remember(

@@ -48,6 +48,40 @@ public sealed class DatabaseMigrator
                 UpdatedUtc TEXT NOT NULL
             );
             """, cancellationToken);
+
+        await EnsureColumnAsync(connection, "GameProfiles", "TranslationMode", "TEXT NOT NULL DEFAULT 'dialogue'", cancellationToken);
+        await EnsureColumnAsync(connection, "GameProfiles", "OverlayPlacement", "TEXT NOT NULL DEFAULT 'cover'", cancellationToken);
+        await EnsureColumnAsync(connection, "GameProfiles", "OverlayBackgroundOpacity", "REAL NOT NULL DEFAULT 0.88", cancellationToken);
+        await EnsureColumnAsync(connection, "GameProfiles", "OverlayTextSize", "TEXT NOT NULL DEFAULT 'medium'", cancellationToken);
+        await EnsureColumnAsync(connection, "GameProfiles", "OverlayTextColor", "TEXT NOT NULL DEFAULT 'white'", cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        string definition,
+        CancellationToken cancellationToken)
+    {
+        var exists = false;
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"PRAGMA table_info({table})";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+
+        if (!exists)
+        {
+            await ExecuteAsync(connection, $"ALTER TABLE {table} ADD COLUMN {column} {definition}", cancellationToken);
+        }
     }
 
     private static async Task ExecuteAsync(SqliteConnection connection, string commandText, CancellationToken cancellationToken)
