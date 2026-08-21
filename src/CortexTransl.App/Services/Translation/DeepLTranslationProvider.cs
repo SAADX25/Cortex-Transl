@@ -13,6 +13,8 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
     private const int MaximumBatchSize = 40;
     private const string GameDialogueContext =
         "Spoken video-game story dialogue. Translate into natural Arabic a player can read quickly. Keep character names and every clause. Do not add extra sentences.";
+    private const string GameMenuContext =
+        "Short video-game or desktop UI labels under icons and on buttons. Translate into concise Arabic. Keep brand names when they are commonly left in English. Do not add extra words.";
     private readonly TranslationProviderSettings _settings;
     private readonly HttpClient _httpClient;
 
@@ -114,7 +116,7 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
             TargetLanguage = MapLanguage(targetLanguage, isTarget: true),
             SplitSentences = "0",
             PreserveFormatting = true,
-            Context = GameDialogueContext
+            Context = texts.All(static text => text.Length <= 48) ? GameMenuContext : GameDialogueContext
         };
 
         if (!sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))

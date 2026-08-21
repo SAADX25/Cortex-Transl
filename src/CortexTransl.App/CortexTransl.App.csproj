@@ -7,13 +7,26 @@
     <UseWPF>true</UseWPF>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>CortexTransl.ico</ApplicationIcon>
     <AssemblyName>CortexTransl.App</AssemblyName>
     <RootNamespace>CortexTransl.App</RootNamespace>
+    <Product>Cortex Transl</Product>
+    <AssemblyTitle>Cortex Transl</AssemblyTitle>
+    <Description>Live game-dialogue overlay translator for Windows.</Description>
+    <Version>1.2.0</Version>
+    <FileVersion>1.2.0.0</FileVersion>
+    <InformationalVersion>1.2.0</InformationalVersion>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
   </PropertyGroup>
 
   <ItemGroup>
+    <Resource Include="CortexTransl.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BergamotTranslatorSharp" Version="0.5.1" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
   </ItemGroup>
 </Project>

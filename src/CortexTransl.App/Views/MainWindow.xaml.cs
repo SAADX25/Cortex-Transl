@@ -16,18 +16,11 @@ namespace CortexTransl.App.Views;
 
 public partial class MainWindow : Window
 {
-    private const double CompactWidth = 540;
-    private const double CompactHeight = 560;
     private static readonly TimeSpan F10DebounceInterval = TimeSpan.FromMilliseconds(280);
 
     private readonly GlobalHotkeyService _hotkeyService = new();
     private readonly PlayViewModel _viewModel;
-
-    private bool _gamePanelOpen;
-    private WindowState _stateBeforePanel = WindowState.Normal;
-    private Rect _boundsBeforePanel;
-    private double? _compactLeft;
-    private double? _compactTop;
+    private readonly ScreenCaptureService _screenCapture;
     private DateTimeOffset _lastF10Utc = DateTimeOffset.MinValue;
 
     public MainWindow()
@@ -37,11 +30,16 @@ public partial class MainWindow : Window
         var paths = AppDataPaths.CreateDefault();
         var connectionFactory = new SqliteConnectionFactory(paths.DatabasePath);
         var translationSettings = new TranslationProviderSettings();
-        var screenCapture = new ScreenCaptureService();
+        _screenCapture = new ScreenCaptureService();
+        var offlineInstaller = new OfflineModelInstaller(paths.ModelsDirectory, paths.BundledModelsDirectory);
+        var offlineProvider = new OfflineBergamotTranslationProvider(offlineInstaller);
         var pipeline = new TranslationPipeline(
-            screenCapture,
+            _screenCapture,
             new WindowsOcrEngine(),
-            new DeepLTranslationProvider(translationSettings),
+            new RoutingTranslationProvider(
+                translationSettings,
+                offlineProvider,
+                new DeepLTranslationProvider(translationSettings)),
             new SqliteTranslationCacheRepository(connectionFactory));
 
         _viewModel = new PlayViewModel(
@@ -51,6 +49,7 @@ public partial class MainWindow : Window
             new OverlayService(),
             new SqliteGameProfileRepository(connectionFactory),
             translationSettings,
+            offlineProvider,
             new AppSettingsService(paths.DataDirectory),
             new ThemeService());
 
@@ -58,7 +57,6 @@ public partial class MainWindow : Window
         _viewModel.MinimizeRequested += OnMinimizeRequested;
         Loaded += OnLoaded;
         Closed += OnClosed;
-        LocationChanged += OnLocationChanged;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -66,7 +64,10 @@ public partial class MainWindow : Window
         try
         {
             await _viewModel.InitializeAsync();
-            ApiKeyPasswordBox.Password = _viewModel.DeepLApiKey;
+            if (ApiKeyPasswordBox is not null)
+            {
+                ApiKeyPasswordBox.Password = _viewModel.DeepLApiKey;
+            }
 
             _hotkeyService.Register(this, Key.F8);
             _hotkeyService.Register(this, Key.F9);
@@ -75,8 +76,14 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _viewModel.Dispose();
-            MessageBox.Show(this, ex.Message, "Cortex Transl failed to start", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppLog.Write("startup", ex);
+            _viewModel.SetStatusMessage("Startup hit a problem. Try selecting the region with F9.");
+            MessageBox.Show(
+                this,
+                "Cortex Transl opened, but one setup step failed. You can still try F9 then F8.",
+                "Cortex Transl",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
     }
 
@@ -102,30 +109,24 @@ public partial class MainWindow : Window
             }
             else if (e.Key == Key.F10)
             {
-                ToggleGamePanel();
+                ToggleProgramWindow();
             }
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Cortex Transl", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppLog.Write("hotkey", ex);
+            _viewModel.SetStatusMessage("That shortcut hit a problem. Try it again.");
         }
     }
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape && _gamePanelOpen)
-        {
-            e.Handled = true;
-            CloseGamePanel();
-            return;
-        }
-
         if ((e.Key == Key.System && e.SystemKey == Key.F10) || e.Key == Key.F10)
         {
             e.Handled = true;
             if (!_hotkeyService.IsRegistered(Key.F10))
             {
-                ToggleGamePanel();
+                ToggleProgramWindow();
             }
 
             return;
@@ -134,44 +135,37 @@ public partial class MainWindow : Window
         if (e.Key is Key.F8 or Key.F9)
         {
             e.Handled = true;
-        }
-    }
-
-    private void OnLocationChanged(object? sender, EventArgs e)
-    {
-        if (_gamePanelOpen && WindowState == WindowState.Normal)
-        {
-            _compactLeft = Left;
-            _compactTop = Top;
+            if (e.Key == Key.F8 && !_hotkeyService.IsRegistered(Key.F8))
+            {
+                _ = _viewModel.HandleF8Async();
+            }
+            else if (e.Key == Key.F9 && !_hotkeyService.IsRegistered(Key.F9))
+            {
+                _ = SelectRegionFromHotkeyAsync();
+            }
         }
     }
 
     private async Task SelectRegionFromHotkeyAsync()
     {
-        var reopenPanel = _gamePanelOpen;
-        if (reopenPanel)
-        {
-            RememberCompactPosition();
-            _gamePanelOpen = false;
-            _viewModel.SuppressAutoCapture = false;
-            Topmost = false;
-            Hide();
-        }
-
+        var restoreAfterSelect = IsVisible && WindowState != WindowState.Minimized && !_viewModel.IsPlaying;
+        Hide();
         try
         {
             await _viewModel.HandleF9Async();
         }
         finally
         {
-            if (reopenPanel)
+            if (restoreAfterSelect)
             {
-                ShowGamePanelUi();
+                Show();
+                WindowState = WindowState.Normal;
+                Activate();
             }
         }
     }
 
-    private void ToggleGamePanel()
+    private void ToggleProgramWindow()
     {
         var now = DateTimeOffset.UtcNow;
         if (now - _lastF10Utc < F10DebounceInterval)
@@ -180,105 +174,39 @@ public partial class MainWindow : Window
         }
 
         _lastF10Utc = now;
-        if (_gamePanelOpen)
+        if (IsVisible && WindowState != WindowState.Minimized)
         {
-            CloseGamePanel();
-            return;
-        }
-
-        OpenGamePanel();
-    }
-
-    private void OpenGamePanel()
-    {
-        _stateBeforePanel = WindowState;
-        _boundsBeforePanel = WindowState == WindowState.Normal
-            ? new Rect(Left, Top, ActualWidth > 0 ? ActualWidth : Width, ActualHeight > 0 ? ActualHeight : Height)
-            : RestoreBounds;
-        ShowGamePanelUi();
-    }
-
-    private void ShowGamePanelUi()
-    {
-        _gamePanelOpen = true;
-        _viewModel.SuppressAutoCapture = true;
-        Show();
-        Topmost = true;
-        WindowState = WindowState.Normal;
-        Width = CompactWidth;
-        Height = CompactHeight;
-        PlaceCompactPanel();
-        Activate();
-        _viewModel.SetStatusMessage("Menu open. F10 or Esc returns to the game.");
-    }
-
-    private void PlaceCompactPanel()
-    {
-        var work = ScreenCoordinates.GetCursorWorkAreaDip();
-        var width = Width;
-        var height = Height;
-        var left = _compactLeft ?? (work.Right - width - 16);
-        var top = _compactTop ?? (work.Top + 48);
-        Left = Math.Clamp(left, work.Left, Math.Max(work.Left, work.Right - width));
-        Top = Math.Clamp(top, work.Top, Math.Max(work.Top, work.Bottom - height));
-    }
-
-    private void RememberCompactPosition()
-    {
-        if (WindowState == WindowState.Normal)
-        {
-            _compactLeft = Left;
-            _compactTop = Top;
-        }
-    }
-
-    private void CloseGamePanel()
-    {
-        if (!_gamePanelOpen)
-        {
-            return;
-        }
-
-        RememberCompactPosition();
-        _gamePanelOpen = false;
-        _viewModel.SuppressAutoCapture = false;
-        Topmost = false;
-
-        if (_viewModel.IsPlaying && _viewModel.MinimizeDuringPlay)
-        {
+            Topmost = false;
             WindowState = WindowState.Minimized;
-            _viewModel.SetStatusMessage("Back to the game. F10 opens the menu.");
+            _viewModel.SetStatusMessage("Hidden. F8 starts or stops translation. F9 selects the region. F10 opens the program.");
             return;
         }
 
         Show();
-        WindowState = _stateBeforePanel == WindowState.Maximized
-            ? WindowState.Normal
-            : _stateBeforePanel;
-        if (WindowState == WindowState.Normal && _boundsBeforePanel.Width > 0 && _boundsBeforePanel.Height > 0)
-        {
-            Left = _boundsBeforePanel.X;
-            Top = _boundsBeforePanel.Y;
-            Width = _boundsBeforePanel.Width;
-            Height = _boundsBeforePanel.Height;
-        }
-
-        _viewModel.SetStatusMessage("Menu closed. F10 opens it over the game.");
+        WindowState = WindowState.Normal;
+        Topmost = true;
+        Activate();
+        _viewModel.SetStatusMessage("Program open. F10 hides it. F9 selects the region. F8 starts translation.");
     }
 
     private void OnMinimizeRequested(object? sender, EventArgs e)
     {
-        RememberCompactPosition();
-        _gamePanelOpen = false;
-        _viewModel.SuppressAutoCapture = false;
         Topmost = false;
         WindowState = WindowState.Minimized;
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
-        _viewModel.MinimizeRequested -= OnMinimizeRequested;
-        _hotkeyService.Dispose();
-        _viewModel.Dispose();
+        try
+        {
+            _viewModel.MinimizeRequested -= OnMinimizeRequested;
+            _hotkeyService.Dispose();
+            _viewModel.Dispose();
+            _screenCapture.Dispose();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("shutdown", ex);
+        }
     }
 }

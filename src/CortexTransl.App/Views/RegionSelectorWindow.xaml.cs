@@ -21,8 +21,15 @@ public partial class RegionSelectorWindow : Window
 
     public CaptureRegion? SelectedRegion { get; private set; }
 
+    public string Hint { get; set; } = "Drag around the dialogue — F9 or Esc to close";
+
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (!string.IsNullOrWhiteSpace(Hint))
+        {
+            HintText.Text = Hint;
+        }
+
         Left = SystemParameters.VirtualScreenLeft;
         Top = SystemParameters.VirtualScreenTop;
         Width = SystemParameters.VirtualScreenWidth;

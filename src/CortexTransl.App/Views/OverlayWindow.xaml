@@ -28,8 +28,7 @@
                        FlowDirection="RightToLeft"
                        Foreground="White"
                        FontFamily="Segoe UI, Tahoma, Arial"
-                       FontWeight="SemiBold"
-                       TextTrimming="CharacterEllipsis" />
+                       FontWeight="SemiBold" />
         </Border>
         <Canvas x:Name="LabelCanvas"
                 IsHitTestVisible="False"

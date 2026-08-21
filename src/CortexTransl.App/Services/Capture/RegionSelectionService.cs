@@ -21,7 +21,7 @@ public sealed class RegionSelectionService : IRegionSelectionService
         selector.Dispatcher.Invoke(() => CloseSelector(selector));
     }
 
-    public Task<CaptureRegion?> SelectRegionAsync()
+    public Task<CaptureRegion?> SelectRegionAsync(string? hint = null)
     {
         if (IsSelecting)
         {
@@ -29,7 +29,12 @@ public sealed class RegionSelectionService : IRegionSelectionService
             return Task.FromResult<CaptureRegion?>(null);
         }
 
-        var window = new RegionSelectorWindow();
+        var window = new RegionSelectorWindow
+        {
+            Hint = string.IsNullOrWhiteSpace(hint)
+                ? "Drag around the dialogue — F9 or Esc to close"
+                : hint
+        };
         _activeSelector = window;
         try
         {

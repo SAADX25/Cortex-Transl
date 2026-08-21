@@ -35,7 +35,7 @@ public sealed class GameProfile
         get
         {
             var language = string.IsNullOrWhiteSpace(SourceLanguage) ? "EN" : SourceLanguage.ToUpperInvariant();
-            var mode = TranslationMode.Equals("list", StringComparison.OrdinalIgnoreCase) ? "List" : "Dialogue";
+            var mode = TranslationMode.Equals("list", StringComparison.OrdinalIgnoreCase) ? "Menus" : "Story";
             var size = OverlayTextSize.Trim().ToLowerInvariant() switch
             {
                 "small" => "Small",

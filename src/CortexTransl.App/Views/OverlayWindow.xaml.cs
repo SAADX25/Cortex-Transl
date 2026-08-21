@@ -1,6 +1,7 @@
 using CortexTransl.App.Models;
 using CortexTransl.App.Services.Capture;
 using CortexTransl.App.Utils;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -17,6 +18,8 @@ public partial class OverlayWindow : Window
     private const int WsExNoActivate = 0x08000000;
     private const int HwndTopmost = -1;
     private const uint SwpNoActivate = 0x0010;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoSize = 0x0001;
     private const uint WdaExcludeFromCapture = 0x00000011;
     private const int PhysicalGap = 8;
 
@@ -77,6 +80,7 @@ public partial class OverlayWindow : Window
 
         TranslationText.Text = trimmed;
         _lastText = trimmed;
+        FitTranslationText();
         ReapplyLockedPlacement();
     }
 
@@ -102,15 +106,15 @@ public partial class OverlayWindow : Window
 
             var left = block.Bounds.X / dpi.DpiScaleX;
             var top = block.Bounds.Y / dpi.DpiScaleY;
-            var width = Math.Max(28, block.Bounds.Width / dpi.DpiScaleX);
-            var height = Math.Max(14, block.Bounds.Height / dpi.DpiScaleY);
-            var fontSize = Math.Clamp(height * 0.72 * _fontScale, 8, 24);
+            var width = Math.Max(36, block.Bounds.Width / dpi.DpiScaleX * 1.28);
+            var height = Math.Max(16, block.Bounds.Height / dpi.DpiScaleY);
+            var fontSize = Math.Clamp(Math.Max(height * 0.58, 10) * _fontScale, 9, 18);
 
             var chip = new Border
             {
                 Background = fill,
-                Padding = new Thickness(3, 1, 3, 1),
-                CornerRadius = new CornerRadius(2),
+                Padding = new Thickness(4, 1, 4, 1),
+                CornerRadius = new CornerRadius(3),
                 Width = width,
                 MinHeight = height,
                 Child = new TextBlock
@@ -123,13 +127,35 @@ public partial class OverlayWindow : Window
                     TextWrapping = TextWrapping.Wrap,
                     TextAlignment = TextAlignment.Center,
                     FlowDirection = FlowDirection.RightToLeft,
-                    TextTrimming = TextTrimming.CharacterEllipsis
+                    VerticalAlignment = VerticalAlignment.Center
                 }
             };
 
             Canvas.SetLeft(chip, left);
             Canvas.SetTop(chip, top);
             LabelCanvas.Children.Add(chip);
+        }
+
+        ReapplyLockedPlacement();
+    }
+
+    public void BringToFront()
+    {
+        if (!IsVisible)
+        {
+            return;
+        }
+
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == nint.Zero)
+        {
+            return;
+        }
+
+        if (_lastPlacementRect.IsEmpty)
+        {
+            SetWindowPos(hwnd, HwndTopmost, 0, 0, 0, 0, SwpNoActivate | SwpNoMove | SwpNoSize);
+            return;
         }
 
         ReapplyLockedPlacement();
@@ -233,14 +259,64 @@ public partial class OverlayWindow : Window
 
     private void ApplyFontSize()
     {
-        if (_isListMode || _lockedHeight <= 0)
+        FitTranslationText();
+    }
+
+    private void FitTranslationText()
+    {
+        if (_isListMode || _lockedWidth <= 0 || _lockedHeight <= 0)
         {
             return;
         }
 
-        var fontSize = Math.Clamp(_lockedHeight * 0.28 * _fontScale, 12, 48);
+        var text = string.IsNullOrWhiteSpace(_lastText) ? TranslationText.Text : _lastText;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        var maxWidth = Math.Max(48, _lockedWidth - 32);
+        var maxHeight = Math.Max(28, _lockedHeight - 22);
+        var maxFont = Math.Clamp(_lockedHeight * 0.2 * _fontScale, 13, 34);
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        if (dpi <= 0)
+        {
+            dpi = 1;
+        }
+
+        var typeface = new Typeface(
+            TranslationText.FontFamily,
+            FontStyles.Normal,
+            FontWeights.SemiBold,
+            FontStretches.Normal);
+
+        var fontSize = maxFont;
+        while (fontSize > 11)
+        {
+            var formatted = new FormattedText(
+                text,
+                CultureInfo.GetCultureInfo("ar"),
+                FlowDirection.RightToLeft,
+                typeface,
+                fontSize,
+                _textBrush,
+                dpi)
+            {
+                MaxTextWidth = maxWidth,
+                Trimming = TextTrimming.None,
+                TextAlignment = TextAlignment.Center
+            };
+
+            if (formatted.Height <= maxHeight)
+            {
+                break;
+            }
+
+            fontSize -= 0.8;
+        }
+
         TranslationText.FontSize = fontSize;
-        TranslationText.LineHeight = fontSize * 1.18;
+        TranslationText.LineHeight = Math.Max(fontSize * 1.12, fontSize + 1);
     }
 
     private void ReapplyLockedPlacement()

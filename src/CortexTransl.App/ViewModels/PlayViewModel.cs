@@ -7,6 +7,8 @@ using CortexTransl.App.Services.Settings;
 using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
 using System.Collections.ObjectModel;
+using System.Windows;
+using System.Windows.Threading;
 
 namespace CortexTransl.App.ViewModels;
 
@@ -20,6 +22,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private readonly IOverlayService _overlayService;
     private readonly IGameProfileRepository _profileRepository;
     private readonly TranslationProviderSettings _translationProviderSettings;
+    private readonly OfflineBergamotTranslationProvider _offlineProvider;
     private readonly AppSettingsService _appSettingsService;
     private readonly ThemeService _themeService;
     private readonly SemaphoreSlim _runLock = new(1, 1);
@@ -28,21 +31,26 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private string _sourceLanguage = "en";
     private string _deepLApiKey = string.Empty;
     private bool _useDeepLFreeApi = true;
+    private string _translationEngine = "offline";
+    private bool _isOfflineReady;
+    private bool _isDownloadingModel;
+    private string _offlineModelStatus = "Arabic translation files download once, then work offline.";
     private string _overlayPlacement = "cover";
     private string _translationMode = "dialogue";
     private double _overlayBackgroundOpacity = 0.88;
     private string _overlayTextSize = "medium";
     private string _overlayTextColor = "white";
-    private bool _minimizeDuringPlay = true;
+    private bool _minimizeDuringPlay;
     private double _autoTranslateIntervalMs = 320;
     private string _profileName = string.Empty;
     private GameProfile? _selectedProfile;
     private string _originalText = string.Empty;
     private string _translatedText = string.Empty;
-    private string _statusMessage = "Paste your DeepL API key, then select the dialogue region.";
+    private string _statusMessage = "Downloading Arabic files or select the dialogue region.";
     private IReadOnlyList<TranslatedBlock> _lastBlocks = [];
     private bool _isPlaying;
     private bool _isBusy;
+    private bool _disposed;
     private string _selectedNavPage = "play";
     private CancellationTokenSource? _playCts;
 
@@ -53,6 +61,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         IOverlayService overlayService,
         IGameProfileRepository profileRepository,
         TranslationProviderSettings translationProviderSettings,
+        OfflineBergamotTranslationProvider offlineProvider,
         AppSettingsService appSettingsService,
         ThemeService themeService)
     {
@@ -62,11 +71,13 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         _overlayService = overlayService;
         _profileRepository = profileRepository;
         _translationProviderSettings = translationProviderSettings;
+        _offlineProvider = offlineProvider;
         _appSettingsService = appSettingsService;
         _themeService = themeService;
 
         SelectRegionCommand = new AsyncRelayCommand(_ => SelectRegionAsync());
         TogglePlayCommand = new AsyncRelayCommand(_ => TogglePlayAsync(), _ => CanStartOrStop());
+        DownloadOfflineModelCommand = new AsyncRelayCommand(_ => EnsureOfflineModelAsync(), _ => CanDownloadModel());
         SaveProfileCommand = new AsyncRelayCommand(_ => SaveProfileAsync(), _ => CanSaveProfile());
         UsePresetCommand = new RelayCommand(parameter => UsePreset(parameter as GameProfile), parameter => parameter is GameProfile);
         DeletePresetCommand = new AsyncRelayCommand(
@@ -88,10 +99,16 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         new("auto", "Auto")
     ];
 
+    public IReadOnlyList<OptionItem> TranslationEngineOptions { get; } =
+    [
+        new("offline", "Offline Arabic files"),
+        new("deepl", "DeepL API")
+    ];
+
     public IReadOnlyList<OptionItem> TranslationModeOptions { get; } =
     [
-        new("dialogue", "Dialogue box"),
-        new("list", "List / icons")
+        new("dialogue", "Story dialogue"),
+        new("list", "Menus & icons")
     ];
 
     public IReadOnlyList<OptionItem> OverlayPlacementOptions { get; } =
@@ -110,6 +127,8 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     ];
 
     public ObservableCollection<GameProfile> Profiles { get; } = [];
+
+    public AsyncRelayCommand DownloadOfflineModelCommand { get; }
 
     public AsyncRelayCommand SelectRegionCommand { get; }
 
@@ -142,12 +161,16 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         : $"{SelectedRegion.Width} × {SelectedRegion.Height}";
 
     public string RegionHint => IsListMode
-        ? "Drag around the icon names or menu list. Each label is translated in place."
-        : "Drag a rectangle around the dialogue box only. Use borderless windowed mode in the game.";
+        ? "Drag around the menu, icon names, or button labels. Each name is translated in place."
+        : "Drag a rectangle around the story dialogue box only. Use borderless windowed mode in the game.";
 
-    public string RegionSectionTitle => IsListMode ? "List region" : "Dialogue region";
+    public string RegionSectionTitle => IsListMode ? "Menu region" : "Story region";
 
-    public string SelectRegionButtonLabel => IsListMode ? "Select list region" : "Select dialogue region";
+    public string SelectRegionButtonLabel => IsListMode ? "Select menu region" : "Select story region";
+
+    public string TranslationModeHint => IsListMode
+        ? "Menus: Arabic sits on each icon or button name, like desktop labels."
+        : "Story: one Arabic box covers the dialogue.";
 
     public bool HasRegion => !SelectedRegion.IsEmpty;
 
@@ -158,11 +181,13 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     public string SessionBadgeText =>
         IsPlaying
             ? "Live"
-            : HasApiKey && HasRegion
+            : CanTranslate && HasRegion
                 ? "Ready"
-                : HasApiKey
+                : CanTranslate
                     ? "Select region"
-                    : "Setup";
+                    : IsOfflineEngine
+                        ? "Download files"
+                        : "Setup";
 
     public string SourceLanguage
     {
@@ -173,6 +198,10 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             {
                 _pipeline.Reset();
                 _ = SaveSettingsAsync();
+                if (IsOfflineEngine)
+                {
+                    _ = EnsureOfflineModelAsync();
+                }
             }
         }
     }
@@ -187,6 +216,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                 _translationProviderSettings.DeepLApiKey = value;
                 OnPropertyChanged(nameof(ApiKeyStatusText));
                 OnPropertyChanged(nameof(HasApiKey));
+                OnPropertyChanged(nameof(CanTranslate));
                 OnPropertyChanged(nameof(SessionBadgeText));
                 TogglePlayCommand.RaiseCanExecuteChanged();
                 _ = SaveSettingsAsync();
@@ -210,6 +240,69 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     public bool HasApiKey => !string.IsNullOrWhiteSpace(DeepLApiKey);
 
     public string ApiKeyStatusText => HasApiKey ? "API key saved and encrypted" : "Paste a DeepL API key";
+
+    public string TranslationEngine
+    {
+        get => _translationEngine;
+        set
+        {
+            var normalized = string.Equals(value, "deepl", StringComparison.OrdinalIgnoreCase) ? "deepl" : "offline";
+            if (SetProperty(ref _translationEngine, normalized))
+            {
+                _translationProviderSettings.TranslationEngine = normalized;
+                _pipeline.Reset();
+                OnPropertyChanged(nameof(IsOfflineEngine));
+                OnPropertyChanged(nameof(IsDeepLEngine));
+                OnPropertyChanged(nameof(CanTranslate));
+                OnPropertyChanged(nameof(SessionBadgeText));
+                TogglePlayCommand.RaiseCanExecuteChanged();
+                DownloadOfflineModelCommand.RaiseCanExecuteChanged();
+                _ = SaveSettingsAsync();
+                if (IsOfflineEngine)
+                {
+                    _ = EnsureOfflineModelAsync();
+                }
+            }
+        }
+    }
+
+    public bool IsOfflineEngine => !_translationEngine.Equals("deepl", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsDeepLEngine => !IsOfflineEngine;
+
+    public bool IsOfflineReady
+    {
+        get => _isOfflineReady;
+        private set
+        {
+            if (SetProperty(ref _isOfflineReady, value))
+            {
+                OnPropertyChanged(nameof(CanTranslate));
+                OnPropertyChanged(nameof(SessionBadgeText));
+                TogglePlayCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool IsDownloadingModel
+    {
+        get => _isDownloadingModel;
+        private set
+        {
+            if (SetProperty(ref _isDownloadingModel, value))
+            {
+                DownloadOfflineModelCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string OfflineModelStatus
+    {
+        get => _offlineModelStatus;
+        private set => SetProperty(ref _offlineModelStatus, value);
+    }
+
+    public bool CanTranslate => IsDeepLEngine ? HasApiKey : IsOfflineReady;
 
     public string OverlayPlacement
     {
@@ -239,6 +332,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(RegionHint));
                 OnPropertyChanged(nameof(RegionSectionTitle));
                 OnPropertyChanged(nameof(SelectRegionButtonLabel));
+                OnPropertyChanged(nameof(TranslationModeHint));
                 _ = SaveSettingsAsync();
                 RefreshOverlay();
             }
@@ -360,7 +454,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     public string NavPageTitle => _selectedNavPage switch
     {
-        "key" => "Translation key",
+        "key" => "Translation engine",
         "region" => "Capture region",
         "look" => "Overlay look",
         "presets" => "Presets",
@@ -369,11 +463,11 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     public string NavPageSubtitle => _selectedNavPage switch
     {
-        "key" => "DeepL API and game language.",
-        "region" => "Choose what the overlay covers.",
+        "key" => "Offline Arabic files or DeepL.",
+        "region" => "Story box or menu labels.",
         "look" => "Size, color, position, and opacity.",
         "presets" => "Save a game setup and tap to load it.",
-        _ => "Start translation and check the last capture."
+        _ => "Pick story or menus, then start translation."
     };
 
     public bool MinimizeDuringPlay
@@ -473,10 +567,15 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             ? 320
             : settings.AutoTranslateIntervalMs;
         _useDeepLFreeApi = settings.UseDeepLFreeApi;
+        _translationEngine = string.Equals(settings.TranslationEngine, "deepl", StringComparison.OrdinalIgnoreCase)
+            ? "deepl"
+            : "offline";
         _profileName = settings.ProfileName;
         _deepLApiKey = _appSettingsService.DecryptApiKey(settings.EncryptedDeepLApiKey);
         _translationProviderSettings.DeepLApiKey = _deepLApiKey;
         _translationProviderSettings.UseDeepLFreeApi = _useDeepLFreeApi;
+        _translationProviderSettings.TranslationEngine = _translationEngine;
+        IsOfflineReady = _offlineProvider.IsEnglishArabicReady;
 
         if (settings.RegionWidth > 0 && settings.RegionHeight > 0)
         {
@@ -491,6 +590,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RegionHint));
         OnPropertyChanged(nameof(RegionSectionTitle));
         OnPropertyChanged(nameof(SelectRegionButtonLabel));
+        OnPropertyChanged(nameof(TranslationModeHint));
         OnPropertyChanged(nameof(OverlayBackgroundOpacity));
         OnPropertyChanged(nameof(OverlayOpacityPercent));
         OnPropertyChanged(nameof(OverlayTextSize));
@@ -501,6 +601,11 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(OverlayTextColorLabel));
         OnPropertyChanged(nameof(MinimizeDuringPlay));
         OnPropertyChanged(nameof(UseDeepLFreeApi));
+        OnPropertyChanged(nameof(TranslationEngine));
+        OnPropertyChanged(nameof(IsOfflineEngine));
+        OnPropertyChanged(nameof(IsDeepLEngine));
+        OnPropertyChanged(nameof(IsOfflineReady));
+        OnPropertyChanged(nameof(CanTranslate));
         OnPropertyChanged(nameof(ProfileName));
         OnPropertyChanged(nameof(DeepLApiKey));
         OnPropertyChanged(nameof(HasApiKey));
@@ -514,13 +619,25 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         SaveProfileCommand.RaiseCanExecuteChanged();
         TogglePlayCommand.RaiseCanExecuteChanged();
 
-        SelectedNavPage = !HasApiKey ? "key" : !HasRegion ? "region" : "play";
+        SelectedNavPage = !CanTranslate ? "key" : !HasRegion ? "region" : "play";
 
-        StatusMessage = HasApiKey
-            ? SelectedRegion.IsEmpty
-                ? "Select the dialogue region, then press F8."
-                : "Ready. F8 starts translation. F10 opens the menu."
-            : "Paste your DeepL API key, then select the dialogue region.";
+        if (IsOfflineEngine)
+        {
+            StatusMessage = IsOfflineReady
+                ? SelectedRegion.IsEmpty
+                    ? "Select the dialogue region, then press F8."
+                    : "Ready. F8 starts translation. F10 opens the menu."
+                : "Downloading Arabic translation files...";
+            _ = EnsureOfflineModelAsync();
+        }
+        else
+        {
+            StatusMessage = HasApiKey
+                ? SelectedRegion.IsEmpty
+                    ? "Select the dialogue region, then press F8."
+                    : "Ready. F8 starts translation. F10 opens the menu."
+                : "Paste your DeepL API key, then select the dialogue region.";
+        }
     }
 
     public async Task HandleF8Async()
@@ -542,14 +659,24 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     private bool CanStartOrStop()
     {
-        return IsPlaying || (HasApiKey && !SelectedRegion.IsEmpty && !_isBusy);
+        return IsPlaying || (CanTranslate && !SelectedRegion.IsEmpty && !_isBusy);
     }
 
     private async Task SelectRegionAsync()
     {
+        var overlayWasVisible = _overlayService.IsVisible;
+        if (overlayWasVisible)
+        {
+            _overlayService.Hide();
+            await Task.Delay(40);
+        }
+
         try
         {
-            var region = await _regionSelectionService.SelectRegionAsync();
+            var region = await _regionSelectionService.SelectRegionAsync(
+                IsListMode
+                    ? "Drag around the menu or icon names — F9 or Esc to close"
+                    : "Drag around the story dialogue — F9 or Esc to close");
             if (region is null || region.IsEmpty)
             {
                 if (!_regionSelectionService.IsSelecting)
@@ -573,11 +700,18 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             }
 
             await SaveSettingsAsync();
-            StatusMessage = "Region selected. F8 starts translation. F10 opens the menu.";
+            StatusMessage = "Region selected. Press F8 to start translation.";
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
+        }
+        finally
+        {
+            if (overlayWasVisible && IsPlaying)
+            {
+                PinOverlay();
+            }
         }
     }
 
@@ -586,14 +720,16 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         if (IsPlaying)
         {
             StopPlay();
-            StatusMessage = "Translation hidden. F8 starts it again. F10 opens the menu.";
+            StatusMessage = "Translation hidden. F8 starts it again. F10 opens the program.";
             return;
         }
 
-        if (!HasApiKey)
+        if (!CanTranslate)
         {
             SelectedNavPage = "key";
-            StatusMessage = "Paste a DeepL API key first.";
+            StatusMessage = IsOfflineEngine
+                ? "Download the Arabic translation files first."
+                : "Paste a DeepL API key first.";
             return;
         }
 
@@ -605,111 +741,199 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
 
         IsPlaying = true;
+        _playCts?.Dispose();
         _playCts = new CancellationTokenSource();
-        PinOverlay();
-        StatusMessage = "Translation on. Press F8 to hide it. F10 opens the menu.";
+        StatusMessage = "Translation on. F8 stops it. F10 opens the program.";
         if (MinimizeDuringPlay)
         {
             MinimizeRequested?.Invoke(this, EventArgs.Empty);
         }
 
-        _ = PlayLoopAsync(_playCts.Token);
+        _ = Task.Run(() => PlayLoopAsync(_playCts.Token));
         TogglePlayCommand.RaiseCanExecuteChanged();
         await Task.CompletedTask;
     }
 
     private void StopPlay()
     {
-        _playCts?.Cancel();
-        _playCts?.Dispose();
-        _playCts = null;
+        try
+        {
+            _playCts?.Cancel();
+        }
+        catch
+        {
+        }
+
         IsPlaying = false;
-        _overlayService.Hide();
+        try
+        {
+            _overlayService.Hide();
+        }
+        catch
+        {
+        }
     }
 
     private async Task PlayLoopAsync(CancellationToken token)
     {
         try
         {
-            await RunTurnAsync(token);
-            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Clamp(_autoTranslateIntervalMs, 280, 450)));
-            while (await timer.WaitForNextTickAsync(token))
+            var skipped = false;
+            while (!token.IsCancellationRequested)
             {
-                await RunTurnAsync(token);
+                skipped = await RunTurnAsync(token);
+                var delay = skipped ? 360 : 120;
+                await Task.Delay(delay, token);
             }
         }
         catch (OperationCanceledException)
         {
         }
+        catch (ObjectDisposedException)
+        {
+        }
         catch (Exception ex)
         {
-            StatusMessage = ex.Message;
-            StopPlay();
+            AppLog.Write("play-loop", ex);
+            RunOnUi(() =>
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                StatusMessage = "Translation paused. Press F8 to start again.";
+                StopPlay();
+            });
         }
     }
 
-    private async Task RunTurnAsync(CancellationToken cancellationToken)
+    private async Task<bool> RunTurnAsync(CancellationToken cancellationToken)
     {
-        if (SuppressAutoCapture)
+        if (_disposed || SuppressAutoCapture)
         {
-            return;
+            return true;
         }
 
         if (!await _runLock.WaitAsync(0, cancellationToken))
         {
-            return;
+            return true;
         }
 
         _isBusy = true;
-        TogglePlayCommand.RaiseCanExecuteChanged();
+        RunOnUi(() => TogglePlayCommand.RaiseCanExecuteChanged());
 
         try
         {
-            if (!_overlayService.IsVisible)
+            if (_disposed)
             {
-                PinOverlay();
+                return true;
             }
 
             _translationProviderSettings.DeepLApiKey = DeepLApiKey;
             _translationProviderSettings.UseDeepLFreeApi = UseDeepLFreeApi;
+            _translationProviderSettings.TranslationEngine = TranslationEngine;
 
+            var listMode = IsListMode;
             var result = await _pipeline.RunAsync(
                 SelectedRegion,
                 SourceLanguage,
                 TargetLanguage,
-                IsListMode,
+                listMode,
                 cancellationToken);
 
-            if (!string.IsNullOrWhiteSpace(result.OriginalText))
-            {
-                OriginalText = result.OriginalText;
-            }
+            var original = result.OriginalText;
+            var translated = result.TranslatedText;
+            var skipped = result.Skipped;
+            var status = result.Status;
+            var blocks = result.Blocks;
+            var playing = IsPlaying && !_disposed;
 
-            if (IsListMode)
+            RunOnUi(() =>
             {
-                if (result.Blocks.Count > 0)
+                if (_disposed)
                 {
-                    _lastBlocks = result.Blocks;
-                    TranslatedText = result.TranslatedText;
-                    _overlayService.SetBlocks(_lastBlocks);
+                    return;
                 }
-            }
-            else if (!string.IsNullOrWhiteSpace(result.TranslatedText))
-            {
-                TranslatedText = result.TranslatedText;
-                _overlayService.SetText(TranslatedText);
-            }
 
-            if (!result.Skipped)
-            {
-                StatusMessage = result.Status;
-            }
+                if (!string.IsNullOrWhiteSpace(original))
+                {
+                    OriginalText = original;
+                }
+
+                var textChanged = false;
+                if (!string.IsNullOrWhiteSpace(translated) && translated != TranslatedText)
+                {
+                    TranslatedText = translated;
+                    textChanged = true;
+                }
+
+                if (listMode && !skipped && blocks.Count > 0)
+                {
+                    _lastBlocks = blocks;
+                    textChanged = true;
+                }
+
+                if (playing && (textChanged || !_overlayService.IsVisible))
+                {
+                    if (listMode)
+                    {
+                        if (_lastBlocks.Count > 0)
+                        {
+                            PinOverlay();
+                        }
+                    }
+                    else if (!string.IsNullOrWhiteSpace(TranslatedText))
+                    {
+                        PinOverlay();
+                    }
+                }
+
+                if (!skipped)
+                {
+                    StatusMessage = status;
+                }
+            });
+
+            return skipped || string.IsNullOrWhiteSpace(translated);
         }
         finally
         {
             _isBusy = false;
-            TogglePlayCommand.RaiseCanExecuteChanged();
-            _runLock.Release();
+            try
+            {
+                if (!_disposed)
+                {
+                    RunOnUi(() => TogglePlayCommand.RaiseCanExecuteChanged());
+                    _runLock.Release();
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
+    private static void RunOnUi(Action action)
+    {
+        try
+        {
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+            {
+                return;
+            }
+
+            if (dispatcher.CheckAccess())
+            {
+                action();
+                return;
+            }
+
+            dispatcher.Invoke(action, DispatcherPriority.Send, CancellationToken.None, TimeSpan.FromMilliseconds(400));
+        }
+        catch
+        {
         }
     }
 
@@ -732,8 +956,11 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             {
                 _overlayService.SetBlocks(_lastBlocks);
             }
+
+            return;
         }
-        else if (!string.IsNullOrWhiteSpace(TranslatedText))
+
+        if (!string.IsNullOrWhiteSpace(TranslatedText))
         {
             _overlayService.SetText(TranslatedText);
         }
@@ -822,13 +1049,13 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             Region = SelectedRegion,
             SourceLanguage = SourceLanguage,
             TargetLanguage = TargetLanguage,
-            TranslationMode = TranslationMode,
+            TranslationMode = _translationMode,
             OverlayPlacement = OverlayPlacement,
             OverlayBackgroundOpacity = OverlayBackgroundOpacity,
             OverlayTextSize = OverlayTextSize,
             OverlayTextColor = OverlayTextColor,
             OcrEngine = "windows",
-            TranslationProvider = "deepl"
+            TranslationProvider = IsOfflineEngine ? "offline" : "deepl"
         };
     }
 
@@ -856,6 +1083,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RegionHint));
         OnPropertyChanged(nameof(RegionSectionTitle));
         OnPropertyChanged(nameof(SelectRegionButtonLabel));
+        OnPropertyChanged(nameof(TranslationModeHint));
         OnPropertyChanged(nameof(OverlayPlacement));
         OnPropertyChanged(nameof(OverlayBackgroundOpacity));
         OnPropertyChanged(nameof(OverlayOpacityPercent));
@@ -905,6 +1133,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         {
             EncryptedDeepLApiKey = _appSettingsService.EncryptApiKey(_deepLApiKey),
             UseDeepLFreeApi = _useDeepLFreeApi,
+            TranslationEngine = _translationEngine,
             Theme = "Dark",
             SourceLanguage = _sourceLanguage,
             OverlayPlacement = _overlayPlacement,
@@ -961,10 +1190,103 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(NavPageSubtitle));
     }
 
+    private bool CanDownloadModel()
+    {
+        return IsOfflineEngine && !IsDownloadingModel;
+    }
+
+    private async Task EnsureOfflineModelAsync()
+    {
+        if (IsDownloadingModel)
+        {
+            return;
+        }
+
+        IsDownloadingModel = true;
+        var progress = new Progress<string>(message =>
+        {
+            OfflineModelStatus = message;
+            StatusMessage = message;
+        });
+
+        try
+        {
+            await _offlineProvider.EnsureReadyAsync(SourceLanguage, progress);
+            IsOfflineReady = true;
+            OfflineModelStatus = "Arabic files are on this PC. No API key needed.";
+            if (!IsPlaying)
+            {
+                StatusMessage = SelectedRegion.IsEmpty
+                    ? "Arabic files ready. Select the dialogue region, then press F8."
+                    : "Arabic files ready. F8 starts translation.";
+            }
+
+            OnPropertyChanged(nameof(CanTranslate));
+            OnPropertyChanged(nameof(SessionBadgeText));
+            TogglePlayCommand.RaiseCanExecuteChanged();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _offlineProvider.TranslateAsync("Hello.", "en", "ar");
+                }
+                catch
+                {
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            IsOfflineReady = _offlineProvider.IsEnglishArabicReady;
+            OfflineModelStatus = ex.Message;
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsDownloadingModel = false;
+        }
+    }
+
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         StopPlay();
-        _overlayService.Dispose();
-        _runLock.Dispose();
+        try
+        {
+            _playCts?.Dispose();
+        }
+        catch
+        {
+        }
+
+        _playCts = null;
+        try
+        {
+            _offlineProvider.Dispose();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _overlayService.Dispose();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _runLock.Dispose();
+        }
+        catch
+        {
+        }
     }
 }

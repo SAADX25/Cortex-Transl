@@ -43,7 +43,14 @@ public sealed class AsyncRelayCommand : ICommand
 
     public async void Execute(object? parameter)
     {
-        await ExecuteAsync(parameter);
+        try
+        {
+            await ExecuteAsync(parameter);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("command", ex);
+        }
     }
 
     public async Task ExecuteAsync(object? parameter = null)
@@ -61,6 +68,10 @@ public sealed class AsyncRelayCommand : ICommand
             }
 
             await _execute(parameter);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("command", ex);
         }
         finally
         {

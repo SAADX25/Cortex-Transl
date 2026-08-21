@@ -22,43 +22,54 @@ public sealed class SqliteTranslationCacheRepository : ITranslationCacheReposito
     {
         var hash = TextHasher.Sha256(sourceText);
 
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT Id, TranslatedText
-            FROM TranslationCache
-            WHERE SourceTextHash = $hash
-              AND SourceLanguage = $sourceLanguage
-              AND TargetLanguage = $targetLanguage
-              AND Provider = $provider
-            LIMIT 1;
-            """;
-        command.Parameters.AddWithValue("$hash", hash);
-        command.Parameters.AddWithValue("$sourceLanguage", sourceLanguage);
-        command.Parameters.AddWithValue("$targetLanguage", targetLanguage);
-        command.Parameters.AddWithValue("$provider", provider);
-
-        long? id = null;
-        string? translatedText = null;
-
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        try
         {
-            if (await reader.ReadAsync(cancellationToken))
-            {
-                id = reader.GetInt64(0);
-                translatedText = reader.GetString(1);
-            }
-        }
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
 
-        if (id is null)
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT Id, TranslatedText
+                FROM TranslationCache
+                WHERE SourceTextHash = $hash
+                  AND SourceLanguage = $sourceLanguage
+                  AND TargetLanguage = $targetLanguage
+                  AND Provider = $provider
+                LIMIT 1;
+                """;
+            command.Parameters.AddWithValue("$hash", hash);
+            command.Parameters.AddWithValue("$sourceLanguage", sourceLanguage);
+            command.Parameters.AddWithValue("$targetLanguage", targetLanguage);
+            command.Parameters.AddWithValue("$provider", provider);
+
+            long? id = null;
+            string? translatedText = null;
+
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+            {
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    id = reader.GetInt64(0);
+                    translatedText = reader.GetString(1);
+                }
+            }
+
+            if (id is null)
+            {
+                return null;
+            }
+
+            await IncrementHitCountAsync(connection, id.Value, cancellationToken);
+            return translatedText;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
         {
             return null;
         }
-
-        await IncrementHitCountAsync(connection, id.Value, cancellationToken);
-        return translatedText;
     }
 
     public async Task SaveAsync(
@@ -72,30 +83,40 @@ public sealed class SqliteTranslationCacheRepository : ITranslationCacheReposito
         var now = DateTimeOffset.UtcNow.ToString("O");
         var hash = TextHasher.Sha256(sourceText);
 
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        try
+        {
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO TranslationCache
-                (SourceTextHash, SourceText, SourceLanguage, TargetLanguage, Provider, TranslatedText, CreatedUtc, LastUsedUtc, HitCount)
-            VALUES
-                ($hash, $sourceText, $sourceLanguage, $targetLanguage, $provider, $translatedText, $now, $now, 0)
-            ON CONFLICT(SourceTextHash, SourceLanguage, TargetLanguage, Provider)
-            DO UPDATE SET
-                SourceText = excluded.SourceText,
-                TranslatedText = excluded.TranslatedText,
-                LastUsedUtc = excluded.LastUsedUtc;
-            """;
-        command.Parameters.AddWithValue("$hash", hash);
-        command.Parameters.AddWithValue("$sourceText", sourceText);
-        command.Parameters.AddWithValue("$sourceLanguage", sourceLanguage);
-        command.Parameters.AddWithValue("$targetLanguage", targetLanguage);
-        command.Parameters.AddWithValue("$provider", provider);
-        command.Parameters.AddWithValue("$translatedText", translatedText);
-        command.Parameters.AddWithValue("$now", now);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO TranslationCache
+                    (SourceTextHash, SourceText, SourceLanguage, TargetLanguage, Provider, TranslatedText, CreatedUtc, LastUsedUtc, HitCount)
+                VALUES
+                    ($hash, $sourceText, $sourceLanguage, $targetLanguage, $provider, $translatedText, $now, $now, 0)
+                ON CONFLICT(SourceTextHash, SourceLanguage, TargetLanguage, Provider)
+                DO UPDATE SET
+                    SourceText = excluded.SourceText,
+                    TranslatedText = excluded.TranslatedText,
+                    LastUsedUtc = excluded.LastUsedUtc;
+                """;
+            command.Parameters.AddWithValue("$hash", hash);
+            command.Parameters.AddWithValue("$sourceText", sourceText);
+            command.Parameters.AddWithValue("$sourceLanguage", sourceLanguage);
+            command.Parameters.AddWithValue("$targetLanguage", targetLanguage);
+            command.Parameters.AddWithValue("$provider", provider);
+            command.Parameters.AddWithValue("$translatedText", translatedText);
+            command.Parameters.AddWithValue("$now", now);
 
-        await command.ExecuteNonQueryAsync(cancellationToken);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+        }
     }
 
     private static async Task IncrementHitCountAsync(SqliteConnection connection, long id, CancellationToken cancellationToken)

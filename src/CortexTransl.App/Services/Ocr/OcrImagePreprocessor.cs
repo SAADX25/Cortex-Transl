@@ -240,9 +240,9 @@ public static class OcrImagePreprocessor
                     true),
                 _ => new OcrPreprocessingOptions(
                     "Normal",
-                    1.0,
-                    3.0,
-                    1.25,
+                    1.35,
+                    2.5,
+                    1.3,
                     true,
                     false,
                     false,

@@ -1,3 +1,4 @@
+using CortexTransl.App.Utils;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
@@ -66,7 +67,10 @@ public sealed class GlobalHotkeyService : IDisposable
     {
         foreach (var id in _registeredKeys)
         {
-            UnregisterHotKey(_handle, id);
+            if (_handle != nint.Zero)
+            {
+                UnregisterHotKey(_handle, id);
+            }
         }
         _registeredKeys.Clear();
 
@@ -82,8 +86,16 @@ public sealed class GlobalHotkeyService : IDisposable
             int id = wParam.ToInt32();
             if (_registeredKeys.Contains(id))
             {
-                Key key = KeyInterop.KeyFromVirtualKey(id);
-                HotkeyPressed?.Invoke(this, new HotkeyEventArgs(key));
+                try
+                {
+                    Key key = KeyInterop.KeyFromVirtualKey(id);
+                    HotkeyPressed?.Invoke(this, new HotkeyEventArgs(key));
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Write("hotkey", ex);
+                }
+
                 handled = true;
             }
         }

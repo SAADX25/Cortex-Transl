@@ -18,8 +18,8 @@ public static class ImageFingerprint
                 const ulong offset = 14695981039346656037UL;
                 const ulong prime = 1099511628211UL;
                 var hash = offset;
-                var xStep = Math.Max(1, bitmap.Width / 64);
-                var yStep = Math.Max(1, bitmap.Height / 64);
+                var xStep = Math.Max(1, bitmap.Width / 48);
+                var yStep = Math.Max(1, bitmap.Height / 48);
                 var stride = data.Stride;
                 var baseOffset = stride < 0 ? Math.Abs(stride) * (bitmap.Height - 1) : 0;
 
@@ -29,9 +29,9 @@ public static class ImageFingerprint
                     for (var x = 0; x < bitmap.Width; x += xStep)
                     {
                         var index = row + (x * 4);
-                        hash = (hash ^ Marshal.ReadByte(data.Scan0, index)) * prime;
-                        hash = (hash ^ Marshal.ReadByte(data.Scan0, index + 1)) * prime;
-                        hash = (hash ^ Marshal.ReadByte(data.Scan0, index + 2)) * prime;
+                        hash = (hash ^ (byte)(Marshal.ReadByte(data.Scan0, index) >> 4)) * prime;
+                        hash = (hash ^ (byte)(Marshal.ReadByte(data.Scan0, index + 1) >> 4)) * prime;
+                        hash = (hash ^ (byte)(Marshal.ReadByte(data.Scan0, index + 2) >> 4)) * prime;
                     }
                 }
 

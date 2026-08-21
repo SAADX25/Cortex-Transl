@@ -9,5 +9,6 @@ public interface IOcrEngine
     Task<OcrResult> RecognizeAsync(
         Bitmap bitmap,
         string sourceLanguage,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string captureKind = "dialogue");
 }

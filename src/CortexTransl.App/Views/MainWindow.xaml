@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:utils="clr-namespace:CortexTransl.App.Utils"
         Title="Cortex Transl"
+        Icon="/CortexTransl.ico"
         Width="620"
         Height="700"
         MinWidth="520"
@@ -38,7 +39,7 @@
                                  IsChecked="{Binding IsNavKey, Mode=TwoWay}">
                         <StackPanel>
                             <TextBlock Text="&#xE192;" Style="{StaticResource NavItemIcon}" />
-                            <TextBlock Text="API key" Style="{StaticResource NavItemLabel}" />
+                            <TextBlock Text="Translate" Style="{StaticResource NavItemLabel}" />
                         </StackPanel>
                     </RadioButton>
                     <RadioButton Style="{StaticResource NavItem}"
@@ -103,7 +104,7 @@
                                     <MultiDataTrigger>
                                         <MultiDataTrigger.Conditions>
                                             <Condition Binding="{Binding IsPlaying}" Value="False" />
-                                            <Condition Binding="{Binding HasApiKey}" Value="True" />
+                                            <Condition Binding="{Binding CanTranslate}" Value="True" />
                                             <Condition Binding="{Binding HasRegion}" Value="True" />
                                         </MultiDataTrigger.Conditions>
                                         <Setter Property="Background" Value="{DynamicResource BadgeReadyBackgroundBrush}" />
@@ -124,7 +125,7 @@
                                         <MultiDataTrigger>
                                             <MultiDataTrigger.Conditions>
                                                 <Condition Binding="{Binding IsPlaying}" Value="False" />
-                                                <Condition Binding="{Binding HasApiKey}" Value="True" />
+                                                <Condition Binding="{Binding CanTranslate}" Value="True" />
                                                 <Condition Binding="{Binding HasRegion}" Value="True" />
                                             </MultiDataTrigger.Conditions>
                                             <Setter Property="Foreground" Value="{DynamicResource BadgeReadyTextBrush}" />
@@ -142,6 +143,24 @@
                     <StackPanel Visibility="{Binding IsNavPlay, Converter={StaticResource BoolToVis}}">
                         <Border Style="{StaticResource CardBorder}" Padding="16,14">
                             <StackPanel>
+                                <TextBlock Text="What to translate" Style="{StaticResource InputLabel}" />
+                                <UniformGrid Columns="2" Margin="0,0,0,8">
+                                    <RadioButton GroupName="TranslationModePlay"
+                                                 Style="{StaticResource OverlayPlacementChoice}"
+                                                 IsChecked="{Binding TranslationMode, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=dialogue}">
+                                        <TextBlock Text="Story" Style="{StaticResource ChoiceChipText}" />
+                                    </RadioButton>
+                                    <RadioButton GroupName="TranslationModePlay"
+                                                 Style="{StaticResource OverlayPlacementChoice}"
+                                                 Margin="0"
+                                                 IsChecked="{Binding TranslationMode, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=list}">
+                                        <TextBlock Text="Menus" Style="{StaticResource ChoiceChipText}" />
+                                    </RadioButton>
+                                </UniformGrid>
+                                <TextBlock Text="{Binding TranslationModeHint}"
+                                           Style="{StaticResource HintText}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,12" />
                                 <Button Command="{Binding TogglePlayCommand}"
                                         Style="{StaticResource PlayToggleButton}"
                                         ToolTip="F8">
@@ -163,6 +182,7 @@
 
                         <Border Style="{StaticResource CardBorder}">
                             <Expander Header="Last capture"
+                                      IsExpanded="True"
                                       Foreground="{DynamicResource PrimaryTextBrush}">
                                 <StackPanel Margin="0,12,0,0">
                                     <TextBlock Text="Original" Style="{StaticResource InputLabel}" />
@@ -187,36 +207,44 @@
                     <StackPanel Visibility="{Binding IsNavKey, Converter={StaticResource BoolToVis}}">
                         <Border Style="{StaticResource CardBorder}">
                             <StackPanel>
-                                <TextBlock Text="API key" Style="{StaticResource InputLabel}" />
-                                <PasswordBox x:Name="ApiKeyPasswordBox"
-                                             PasswordChanged="ApiKeyPasswordBox_PasswordChanged" />
-                                <TextBlock Text="{Binding ApiKeyStatusText}"
-                                           Style="{StaticResource HintText}"
-                                           Margin="0,6,0,10" />
-                                <CheckBox Content="Use DeepL Free API"
-                                          IsChecked="{Binding UseDeepLFreeApi, Mode=TwoWay}"
-                                          Margin="0,0,0,14" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="12" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="Game language" Style="{StaticResource InputLabel}" />
-                                        <ComboBox ItemsSource="{Binding SourceLanguageOptions}"
-                                                  DisplayMemberPath="Name"
-                                                  SelectedValuePath="Id"
-                                                  SelectedValue="{Binding SourceLanguage, Mode=TwoWay}" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Mode" Style="{StaticResource InputLabel}" />
-                                        <ComboBox ItemsSource="{Binding TranslationModeOptions}"
-                                                  DisplayMemberPath="Name"
-                                                  SelectedValuePath="Id"
-                                                  SelectedValue="{Binding TranslationMode, Mode=TwoWay}" />
-                                    </StackPanel>
-                                </Grid>
+                                <TextBlock Text="Engine" Style="{StaticResource InputLabel}" />
+                                <ComboBox ItemsSource="{Binding TranslationEngineOptions}"
+                                          DisplayMemberPath="Name"
+                                          SelectedValuePath="Id"
+                                          SelectedValue="{Binding TranslationEngine, Mode=TwoWay}"
+                                          Margin="0,0,0,12" />
+                                <StackPanel Visibility="{Binding IsOfflineEngine, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding OfflineModelStatus}"
+                                               Style="{StaticResource HintText}"
+                                               Margin="0,0,0,10"
+                                               TextWrapping="Wrap" />
+                                    <Button Content="Download Arabic files"
+                                            Command="{Binding DownloadOfflineModelCommand}"
+                                            Style="{StaticResource StretchButton}"
+                                            Margin="0,0,0,8" />
+                                    <TextBlock Text="Files stay on this PC. After the first download, translation does not need the internet."
+                                               Style="{StaticResource HintText}"
+                                               Margin="0,0,0,14"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                                <StackPanel Visibility="{Binding IsDeepLEngine, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="API key" Style="{StaticResource InputLabel}" />
+                                    <PasswordBox x:Name="ApiKeyPasswordBox"
+                                                 PasswordChanged="ApiKeyPasswordBox_PasswordChanged" />
+                                    <TextBlock Text="{Binding ApiKeyStatusText}"
+                                               Style="{StaticResource HintText}"
+                                               Margin="0,6,0,10" />
+                                    <CheckBox Content="Use DeepL Free API"
+                                              IsChecked="{Binding UseDeepLFreeApi, Mode=TwoWay}"
+                                              Margin="0,0,0,14" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Game language" Style="{StaticResource InputLabel}" />
+                                    <ComboBox ItemsSource="{Binding SourceLanguageOptions}"
+                                              DisplayMemberPath="Name"
+                                              SelectedValuePath="Id"
+                                              SelectedValue="{Binding SourceLanguage, Mode=TwoWay}" />
+                                </StackPanel>
                                 <TextBlock Text="Arabic overlay. Use borderless windowed mode in the game."
                                            Style="{StaticResource HintText}"
                                            Margin="0,10,0,0" />
@@ -227,6 +255,20 @@
                     <StackPanel Visibility="{Binding IsNavRegion, Converter={StaticResource BoolToVis}}">
                         <Border Style="{StaticResource CardBorder}">
                             <StackPanel>
+                                <TextBlock Text="What to translate" Style="{StaticResource InputLabel}" />
+                                <UniformGrid Columns="2" Margin="0,0,0,10">
+                                    <RadioButton GroupName="TranslationModeRegion"
+                                                 Style="{StaticResource OverlayPlacementChoice}"
+                                                 IsChecked="{Binding TranslationMode, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=dialogue}">
+                                        <TextBlock Text="Story" Style="{StaticResource ChoiceChipText}" />
+                                    </RadioButton>
+                                    <RadioButton GroupName="TranslationModeRegion"
+                                                 Style="{StaticResource OverlayPlacementChoice}"
+                                                 Margin="0"
+                                                 IsChecked="{Binding TranslationMode, Mode=TwoWay, Converter={StaticResource StringEquals}, ConverterParameter=list}">
+                                        <TextBlock Text="Menus" Style="{StaticResource ChoiceChipText}" />
+                                    </RadioButton>
+                                </UniformGrid>
                                 <Grid Margin="0,0,0,10">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -535,13 +577,13 @@
                             <Border Style="{StaticResource KeyCap}">
                                 <TextBlock Text="F9" Style="{StaticResource KeyCapText}" />
                             </Border>
-                            <TextBlock Text="Region" Style="{StaticResource HotkeyLabel}" />
+                            <TextBlock Text="Select region" Style="{StaticResource HotkeyLabel}" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <Border Style="{StaticResource KeyCap}">
                                 <TextBlock Text="F10" Style="{StaticResource KeyCapText}" />
                             </Border>
-                            <TextBlock Text="Menu" Style="{StaticResource HotkeyLabel}" />
+                            <TextBlock Text="Open program" Style="{StaticResource HotkeyLabel}" />
                         </StackPanel>
                     </WrapPanel>
                 </StackPanel>

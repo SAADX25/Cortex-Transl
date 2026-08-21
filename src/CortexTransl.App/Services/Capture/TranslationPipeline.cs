@@ -32,6 +32,8 @@ public sealed class TranslationPipeline
         _cacheRepository = cacheRepository;
     }
 
+    public bool ExcludesOverlayWindows => _screenCaptureService.ExcludesOverlayWindows;
+
     public async Task<PipelineResult> RunAsync(
         CaptureRegion region,
         string sourceLanguage,
@@ -39,40 +41,75 @@ public sealed class TranslationPipeline
         bool listMode,
         CancellationToken cancellationToken = default)
     {
-        using var bitmap = await _screenCaptureService.CaptureAsync(region, cancellationToken);
-        var fingerprint = ImageFingerprint.Compute(bitmap);
-
-        if (fingerprint == _lastFingerprint
-            && !string.IsNullOrWhiteSpace(_lastTranslatedText)
-            && !string.IsNullOrWhiteSpace(_lastOriginalText)
-            && (!listMode || _lastBlocks.Count > 0))
+        try
         {
-            return new PipelineResult(
-                _lastOriginalText,
-                _lastTranslatedText,
-                "Same frame.",
-                false,
-                true,
-                _lastBlocks);
-        }
+            using var bitmap = await _screenCaptureService.CaptureAsync(region, cancellationToken);
+            var fingerprint = ImageFingerprint.Compute(bitmap);
 
-        var ocrResult = await _ocrEngine.RecognizeAsync(bitmap, sourceLanguage, cancellationToken);
-        if (listMode)
-        {
-            return await TranslateListAsync(
+            if (fingerprint == _lastFingerprint
+                && !string.IsNullOrWhiteSpace(_lastTranslatedText)
+                && !string.IsNullOrWhiteSpace(_lastOriginalText)
+                && (!listMode || _lastBlocks.Count > 0))
+            {
+                return new PipelineResult(
+                    _lastOriginalText,
+                    _lastTranslatedText,
+                    "Same frame.",
+                    false,
+                    true,
+                    _lastBlocks);
+            }
+
+            OcrResult ocrResult;
+            try
+            {
+                ocrResult = await _ocrEngine.RecognizeAsync(
+                    bitmap,
+                    sourceLanguage,
+                    cancellationToken,
+                    listMode ? "list" : "dialogue");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("ocr", ex);
+                return KeepLast(fingerprint, "Could not read the text. Select the region again with F9.");
+            }
+
+            if (listMode)
+            {
+                return await TranslateListAsync(
+                    fingerprint,
+                    ocrResult,
+                    sourceLanguage,
+                    targetLanguage,
+                    cancellationToken);
+            }
+
+            return await TranslateDialogueAsync(
                 fingerprint,
                 ocrResult,
                 sourceLanguage,
                 targetLanguage,
                 cancellationToken);
         }
-
-        return await TranslateDialogueAsync(
-            fingerprint,
-            ocrResult,
-            sourceLanguage,
-            targetLanguage,
-            cancellationToken);
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("pipeline", ex);
+            return new PipelineResult(
+                string.Empty,
+                string.Empty,
+                "Capture failed. Select the region again with F9.",
+                false,
+                false);
+        }
     }
 
     public void Reset()
@@ -124,11 +161,7 @@ public sealed class TranslationPipeline
         string translated;
         try
         {
-            translated = await _translationProvider.TranslateAsync(
-                originalText,
-                sourceLanguage,
-                targetLanguage,
-                cancellationToken);
+            translated = await TranslateSmartAsync(originalText, sourceLanguage, targetLanguage, cancellationToken);
         }
         catch (TranslationProviderException ex)
         {
@@ -150,6 +183,30 @@ public sealed class TranslationPipeline
         return new PipelineResult(originalText, translated, "Translated.", false, false);
     }
 
+    private async Task<string> TranslateSmartAsync(
+        string originalText,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        var chunks = TranslationChunker.Split(originalText);
+        if (chunks.Count <= 1)
+        {
+            return await _translationProvider.TranslateAsync(
+                originalText,
+                sourceLanguage,
+                targetLanguage,
+                cancellationToken);
+        }
+
+        var translations = await _translationProvider.TranslateManyAsync(
+            chunks,
+            sourceLanguage,
+            targetLanguage,
+            cancellationToken);
+        return TranslationChunker.Join(translations);
+    }
+
     private async Task<PipelineResult> TranslateListAsync(
         string fingerprint,
         OcrResult ocrResult,
@@ -166,7 +223,14 @@ public sealed class TranslationPipeline
                     : "No labels found. Select the list or icon names.");
         }
 
-        var originalText = DialogueTextAssembler.Assemble(ocrResult, sourceLanguage);
+        var originalText = string.Join(
+            Environment.NewLine,
+            ocrResult.Blocks.Select(block => block.Text).Where(static text => !string.IsNullOrWhiteSpace(text)));
+        if (string.IsNullOrWhiteSpace(originalText))
+        {
+            originalText = DialogueTextAssembler.Assemble(ocrResult, sourceLanguage);
+        }
+
         if (_lastBlocks.Count == ocrResult.Blocks.Count && ShouldHoldLastTranslation(originalText))
         {
             _lastFingerprint = fingerprint;
@@ -181,6 +245,7 @@ public sealed class TranslationPipeline
 
         var uniqueTexts = ocrResult.Blocks
             .Select(block => block.Text)
+            .Where(static text => !string.IsNullOrWhiteSpace(text))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
@@ -189,6 +254,11 @@ public sealed class TranslationPipeline
 
         foreach (var text in uniqueTexts)
         {
+            if (LooksMostlyArabic(text))
+            {
+                continue;
+            }
+
             var cached = await _cacheRepository.GetAsync(
                 text,
                 sourceLanguage,
@@ -267,6 +337,27 @@ public sealed class TranslationPipeline
             usedCache,
             false,
             blocks);
+    }
+
+    private static bool LooksMostlyArabic(string text)
+    {
+        var arabic = 0;
+        var letters = 0;
+        foreach (var character in text)
+        {
+            if (!char.IsLetter(character))
+            {
+                continue;
+            }
+
+            letters++;
+            if (character is >= '\u0600' and <= '\u06FF')
+            {
+                arabic++;
+            }
+        }
+
+        return letters > 0 && arabic * 2 >= letters;
     }
 
     private bool ShouldHoldLastTranslation(string originalText)

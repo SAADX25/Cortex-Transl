@@ -8,5 +8,5 @@ public interface IRegionSelectionService
 
     void Cancel();
 
-    Task<CaptureRegion?> SelectRegionAsync();
+    Task<CaptureRegion?> SelectRegionAsync(string? hint = null);
 }

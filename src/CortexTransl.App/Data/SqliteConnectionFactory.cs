@@ -20,7 +20,7 @@ public sealed class SqliteConnectionFactory
     {
         EnsureSqliteInitialized();
         Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
-        return new SqliteConnection($"Data Source={DatabasePath}");
+        return new SqliteConnection($"Data Source={DatabasePath};Mode=ReadWriteCreate;Cache=Shared;Default Timeout=5");
     }
 
     private static void EnsureSqliteInitialized()

@@ -19,6 +19,49 @@ public static class ScreenCoordinates
         return new CaptureRegion(left, top, width, height);
     }
 
+    public static nint GetMonitorHandle(CaptureRegion region)
+    {
+        var nativeRect = region.IsEmpty
+            ? new NativeRect(0, 0, 1, 1)
+            : new NativeRect(region.X, region.Y, region.X + region.Width, region.Y + region.Height);
+        return MonitorFromRect(ref nativeRect, MonitorDefaultToNearest);
+    }
+
+    public static CaptureRegion GetMonitorPhysical(CaptureRegion region)
+    {
+        return GetMonitorPhysical(GetMonitorHandle(region));
+    }
+
+    public static CaptureRegion GetMonitorPhysicalFromCursor()
+    {
+        if (!GetCursorPos(out var point))
+        {
+            return GetVirtualScreenPhysical();
+        }
+
+        return GetMonitorPhysical(MonitorFromPoint(point, MonitorDefaultToNearest));
+    }
+
+    public static CaptureRegion GetMonitorPhysical(nint monitor)
+    {
+        var info = new MonitorInfo
+        {
+            Size = Marshal.SizeOf<MonitorInfo>()
+        };
+
+        if (monitor == nint.Zero || !GetMonitorInfo(monitor, ref info))
+        {
+            return GetVirtualScreenPhysical();
+        }
+
+        var bounds = info.Monitor;
+        return new CaptureRegion(
+            bounds.Left,
+            bounds.Top,
+            Math.Max(1, bounds.Right - bounds.Left),
+            Math.Max(1, bounds.Bottom - bounds.Top));
+    }
+
     public static bool IsInsideVirtualScreen(CaptureRegion region)
     {
         var clamped = ClampToVirtualScreen(region);

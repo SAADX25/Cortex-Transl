@@ -6,6 +6,8 @@ public sealed class AppSettings
 
     public bool UseDeepLFreeApi { get; set; } = true;
 
+    public string TranslationEngine { get; set; } = "offline";
+
     public string Theme { get; set; } = "Dark";
 
     public string SourceLanguage { get; set; } = "en";
@@ -14,7 +16,7 @@ public sealed class AppSettings
 
     public double OverlayBackgroundOpacity { get; set; } = 0.88;
 
-    public bool MinimizeDuringPlay { get; set; } = true;
+    public bool MinimizeDuringPlay { get; set; }
 
     public double AutoTranslateIntervalMs { get; set; } = 500;
 

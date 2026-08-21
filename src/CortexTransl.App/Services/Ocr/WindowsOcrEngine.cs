@@ -19,22 +19,38 @@ public sealed class WindowsOcrEngine : IOcrEngine
     public async Task<OcrResult> RecognizeAsync(
         Bitmap bitmap,
         string sourceLanguage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string captureKind = "dialogue")
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var preset = bitmap.Height < 220 ? "small-text" : "normal";
-        using var preprocessed = OcrImagePreprocessor.Preprocess(bitmap, preset);
-        using var softwareBitmap = await ToSoftwareBitmapAsync(preprocessed.Bitmap, cancellationToken);
-
-        var engine = CreateEngine(sourceLanguage);
-        if (engine is null)
+        try
         {
+            var useSmallText = captureKind.Equals("list", StringComparison.OrdinalIgnoreCase)
+                || bitmap.Height < 420
+                || bitmap.Width < 980;
+            var preset = useSmallText ? "small-text" : "normal";
+            using var preprocessed = OcrImagePreprocessor.Preprocess(bitmap, preset);
+            using var softwareBitmap = await ToSoftwareBitmapAsync(preprocessed.Bitmap, cancellationToken);
+
+            var engine = CreateEngine(sourceLanguage);
+            if (engine is null)
+            {
+                return new OcrResult(string.Empty);
+            }
+
+            var result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
+            return ToOcrResult(result, preprocessed.Scale, bitmap.Width, bitmap.Height, sourceLanguage);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("ocr", ex);
             return new OcrResult(string.Empty);
         }
-
-        var result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
-        return ToOcrResult(result, preprocessed.Scale, bitmap.Width, bitmap.Height, sourceLanguage);
     }
 
     private static OcrEngine? CreateEngine(string sourceLanguage)
@@ -82,7 +98,7 @@ public sealed class WindowsOcrEngine : IOcrEngine
             }
 
             blocks.Add(new OcrTextBlock(text, bounds));
-            if (blocks.Count >= 80)
+            if (blocks.Count >= 200)
             {
                 break;
             }

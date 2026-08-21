@@ -1,91 +1,125 @@
 using CortexTransl.App.Models;
 using System.Drawing;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Threading;
 
 namespace CortexTransl.App.Services.Capture;
 
 public sealed class ScreenCaptureService : IScreenCaptureService
 {
-    private const int SrcCopy = 0x00CC0020;
-    private const int CaptureBlt = 0x40000000;
+    private readonly object _gate = new();
+    private WindowsGraphicsMonitorCapturer? _capturer;
+    private bool _graphicsCaptureUnavailable;
+    private bool _excludesOverlay;
+
+    public bool ExcludesOverlayWindows => _excludesOverlay;
 
     public Task<Bitmap> CaptureAsync(CaptureRegion region, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
         region = ScreenCoordinates.ClampToVirtualScreen(region);
         if (region.IsEmpty)
         {
             throw new InvalidOperationException("Select the dialogue region first.");
         }
 
-        var bitmap = new Bitmap(region.Width, region.Height, PixelFormat.Format32bppArgb);
         try
         {
-            using var graphics = Graphics.FromImage(bitmap);
-            var destination = graphics.GetHdc();
-            var source = GetDC(nint.Zero);
-            var copied = false;
-
-            try
+            var captured = TryCaptureWithGraphics(region);
+            if (captured is not null && !GdiScreenCapture.LooksBlank(captured))
             {
-                copied = BitBlt(
-                    destination,
-                    0,
-                    0,
-                    region.Width,
-                    region.Height,
-                    source,
-                    region.X,
-                    region.Y,
-                    SrcCopy | CaptureBlt);
-            }
-            finally
-            {
-                if (source != nint.Zero)
-                {
-                    ReleaseDC(nint.Zero, source);
-                }
-
-                graphics.ReleaseHdc(destination);
+                _excludesOverlay = true;
+                return Task.FromResult(captured);
             }
 
-            if (!copied)
-            {
-                graphics.CopyFromScreen(
-                    region.X,
-                    region.Y,
-                    0,
-                    0,
-                    new Size(region.Width, region.Height),
-                    CopyPixelOperation.SourceCopy);
-            }
-
-            return Task.FromResult(bitmap);
+            captured?.Dispose();
         }
         catch
         {
-            bitmap.Dispose();
-            throw;
+            _graphicsCaptureUnavailable = true;
+        }
+
+        _excludesOverlay = false;
+        return Task.FromResult(GdiScreenCapture.Capture(region));
+    }
+
+    public void Dispose()
+    {
+        lock (_gate)
+        {
+            _capturer?.Dispose();
+            _capturer = null;
         }
     }
 
-    [DllImport("user32.dll")]
-    private static extern nint GetDC(nint hwnd);
+    private Bitmap? TryCaptureWithGraphics(CaptureRegion region)
+    {
+        if (_graphicsCaptureUnavailable)
+        {
+            return null;
+        }
 
-    [DllImport("user32.dll")]
-    private static extern int ReleaseDC(nint hwnd, nint hdc);
+        try
+        {
+            var monitor = ScreenCoordinates.GetMonitorHandle(region);
+            var capturer = GetOrCreateCapturer(monitor);
+            return capturer?.CaptureRegion(region, TimeSpan.FromMilliseconds(80));
+        }
+        catch
+        {
+            _graphicsCaptureUnavailable = true;
+            return null;
+        }
+    }
 
-    [DllImport("gdi32.dll")]
-    private static extern bool BitBlt(
-        nint destination,
-        int destinationX,
-        int destinationY,
-        int width,
-        int height,
-        nint source,
-        int sourceX,
-        int sourceY,
-        int rasterOperation);
+    private WindowsGraphicsMonitorCapturer? GetOrCreateCapturer(nint monitor)
+    {
+        lock (_gate)
+        {
+            if (_capturer is not null && _capturer.Monitor == monitor)
+            {
+                return _capturer;
+            }
+
+            _capturer?.Dispose();
+            _capturer = null;
+        }
+
+        var created = CreateOnUi(() => WindowsGraphicsMonitorCapturer.TryCreate(monitor));
+        if (created is null)
+        {
+            _graphicsCaptureUnavailable = true;
+            return null;
+        }
+
+        lock (_gate)
+        {
+            _capturer?.Dispose();
+            _capturer = created;
+            return _capturer;
+        }
+    }
+
+    private static T CreateOnUi<T>(Func<T> factory)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+        {
+            return factory();
+        }
+
+        if (dispatcher.CheckAccess())
+        {
+            return factory();
+        }
+
+        try
+        {
+            return dispatcher.Invoke(factory, DispatcherPriority.Send);
+        }
+        catch
+        {
+            return factory();
+        }
+    }
 }

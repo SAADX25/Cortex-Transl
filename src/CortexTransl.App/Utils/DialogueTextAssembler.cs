@@ -1,3 +1,4 @@
+using CortexTransl.App.Models;
 using CortexTransl.App.Services.Ocr;
 using System.Globalization;
 using System.Text;
@@ -9,18 +10,25 @@ public static partial class DialogueTextAssembler
 {
     public static string Assemble(OcrResult ocrResult, string sourceLanguage)
     {
-        var lines = ocrResult.Blocks
-            .Select(block => CleanLine(block.Text, sourceLanguage))
-            .Where(IsUsefulLine)
+        var blocks = ocrResult.Blocks
+            .Select(block => (Text: CleanLine(block.Text, sourceLanguage), block.Bounds))
+            .Where(block => IsUsefulLine(block.Text) && !block.Bounds.IsEmpty)
+            .OrderBy(block => block.Bounds.Y)
+            .ThenBy(block => block.Bounds.X)
             .ToArray();
 
-        if (lines.Length == 0)
+        if (blocks.Length == 0)
         {
             var fallback = CleanLine(ocrResult.Text, sourceLanguage);
             return IsUsefulLine(fallback) ? fallback : string.Empty;
         }
 
-        return JoinLines(lines, sourceLanguage);
+        if (IsCjkLanguage(sourceLanguage))
+        {
+            return CompactCjk(string.Concat(blocks.Select(block => CompactCjk(block.Text))));
+        }
+
+        return JoinReadingOrder(blocks);
     }
 
     public static bool IsUsefulLine(string text)
@@ -83,34 +91,48 @@ public static partial class DialogueTextAssembler
         return false;
     }
 
-    private static string JoinLines(IReadOnlyList<string> lines, string sourceLanguage)
+    private static string JoinReadingOrder(
+        IReadOnlyList<(string Text, CaptureRegion Bounds)> blocks)
     {
-        if (IsCjkLanguage(sourceLanguage))
-        {
-            return CompactCjk(string.Concat(lines.Select(line => CompactCjk(line))));
-        }
-
         var builder = new StringBuilder();
-        foreach (var line in lines)
+        CaptureRegion? previous = null;
+
+        foreach (var block in blocks)
         {
-            if (builder.Length == 0)
+            if (builder.Length == 0 || previous is null)
             {
-                builder.Append(line);
+                builder.Append(block.Text);
+                previous = block.Bounds;
                 continue;
             }
 
-            var previous = builder[^1];
-            if (previous is '-' or '—' or 'ー')
+            var last = previous;
+            var gap = block.Bounds.Y - (last.Y + last.Height);
+            var lineHeight = Math.Max(12, Math.Max(last.Height, block.Bounds.Height));
+            var sameRow = Math.Abs(block.Bounds.Y - last.Y) <= lineHeight * 0.45;
+
+            if (builder[^1] is '-' or '—' or 'ー')
             {
                 builder.Length--;
-                builder.Append(line);
-                continue;
+                builder.Append(block.Text);
+            }
+            else if (sameRow)
+            {
+                builder.Append(" · ").Append(block.Text);
+            }
+            else if (gap > lineHeight * 0.55)
+            {
+                builder.Append('\n').Append(block.Text);
+            }
+            else
+            {
+                builder.Append(' ').Append(block.Text);
             }
 
-            builder.Append(' ').Append(line);
+            previous = block.Bounds;
         }
 
-        return TextNormalizer.Normalize(builder.ToString());
+        return builder.ToString().Trim();
     }
 
     private static string CleanLine(string text, string sourceLanguage)

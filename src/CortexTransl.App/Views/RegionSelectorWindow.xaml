@@ -15,9 +15,10 @@
             MouseLeftButtonDown="OnMouseLeftButtonDown"
             MouseMove="OnMouseMove"
             MouseLeftButtonUp="OnMouseLeftButtonUp">
-        <TextBlock Canvas.Left="24"
+        <TextBlock x:Name="HintText"
+                   Canvas.Left="24"
                    Canvas.Top="20"
-                   Text="Drag a rectangle around the dialogue box — F9 or Esc to close"
+                   Text="Drag around the dialogue — F9 or Esc to close"
                    Foreground="White"
                    Background="#AA111827"
                    Padding="10,6"

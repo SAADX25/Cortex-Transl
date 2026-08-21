@@ -1,6 +1,6 @@
 using CortexTransl.App.Utils;
 using CortexTransl.App.Views;
-using System.IO;
+using System.Threading;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -8,6 +8,9 @@ namespace CortexTransl.App;
 
 public partial class App : System.Windows.Application
 {
+    private Mutex? _instanceMutex;
+    private bool _ownsInstanceMutex;
+
     public App()
     {
         DispatcherUnhandledException += OnDispatcherUnhandledException;
@@ -17,6 +20,17 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (!TryTakeSingleInstance())
+        {
+            MessageBox.Show(
+                "Cortex Transl is already running.",
+                "Cortex Transl",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
+
         base.OnStartup(e);
 
         var mainWindow = new MainWindow();
@@ -25,43 +39,63 @@ public partial class App : System.Windows.Application
         mainWindow.Activate();
     }
 
+    protected override void OnExit(ExitEventArgs e)
+    {
+        if (_ownsInstanceMutex)
+        {
+            try
+            {
+                _instanceMutex?.ReleaseMutex();
+            }
+            catch
+            {
+            }
+        }
+
+        _instanceMutex?.Dispose();
+        _instanceMutex = null;
+        base.OnExit(e);
+    }
+
+    private bool TryTakeSingleInstance()
+    {
+        _instanceMutex = new Mutex(true, @"Local\CortexTransl.SingleInstance", out var created);
+        _ownsInstanceMutex = created;
+        return created;
+    }
+
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        LogStartupException("dispatcher", e.Exception);
-        MessageBox.Show(e.Exception.ToString(), "Cortex Transl startup error", MessageBoxButton.OK, MessageBoxImage.Error);
+        AppLog.Write("dispatcher", e.Exception);
         e.Handled = true;
-        Current.Shutdown(-1);
-    }
-
-    private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
-    {
-        if (e.ExceptionObject is Exception exception)
-        {
-            LogStartupException("app-domain", exception);
-        }
-        else
-        {
-            LogStartupException("app-domain", new InvalidOperationException(e.ExceptionObject?.ToString() ?? "Unknown fatal error."));
-        }
-    }
-
-    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
-    {
-        LogStartupException("task", e.Exception);
-        e.SetObserved();
-    }
-
-    private static void LogStartupException(string source, Exception exception)
-    {
         try
         {
-            var paths = AppDataPaths.CreateDefault();
-            var message = $"{DateTimeOffset.Now:O} {source}{Environment.NewLine}{exception}{Environment.NewLine}{Environment.NewLine}";
-            File.AppendAllText(Path.Combine(paths.DataDirectory, "logs", "startup-errors.log"), message);
+            MessageBox.Show(
+                "Something went wrong, but Cortex Transl is still running. Try F8 again or select the region with F9.",
+                "Cortex Transl",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
         catch
         {
         }
     }
 
+    private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception exception)
+        {
+            AppLog.Write("app-domain", exception);
+        }
+        else
+        {
+            AppLog.Write("app-domain", e.ExceptionObject?.ToString() ?? "Unknown fatal error.");
+        }
+    }
+
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        AppLog.Write("task", e.Exception);
+        e.SetObserved();
+    }
 }
