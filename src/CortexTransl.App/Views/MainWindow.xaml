@@ -63,6 +63,13 @@
                             <TextBlock Text="Presets" Style="{StaticResource NavItemLabel}" />
                         </StackPanel>
                     </RadioButton>
+                    <RadioButton Style="{StaticResource NavItem}"
+                                 IsChecked="{Binding IsNavTest, Mode=TwoWay}">
+                        <StackPanel>
+                            <TextBlock Text="&#xE9D9;" Style="{StaticResource NavItemIcon}" />
+                            <TextBlock Text="Test" Style="{StaticResource NavItemLabel}" />
+                        </StackPanel>
+                    </RadioButton>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -551,6 +558,123 @@
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
                             </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Visibility="{Binding IsNavTest, Converter={StaticResource BoolToVis}}">
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel>
+                                <TextBlock Text="Input text" Style="{StaticResource InputLabel}" />
+                                <TextBox Text="{Binding TestInputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         TextWrapping="Wrap"
+                                         AcceptsReturn="True"
+                                         MinHeight="80"
+                                         MaxHeight="160"
+                                         VerticalScrollBarVisibility="Auto"
+                                         Margin="0,0,0,10" />
+                                <TextBlock Text="Sample texts" Style="{StaticResource InputLabel}" />
+                                <WrapPanel Margin="0,0,0,10">
+                                    <Button Content="Dialogue"
+                                            Command="{Binding UseTestSampleCommand}"
+                                            CommandParameter="0"
+                                            Style="{StaticResource StretchButton}"
+                                            Width="Auto"
+                                            Padding="12,6"
+                                            Margin="0,0,6,4" />
+                                    <Button Content="Menu"
+                                            Command="{Binding UseTestSampleCommand}"
+                                            CommandParameter="1"
+                                            Style="{StaticResource StretchButton}"
+                                            Width="Auto"
+                                            Padding="12,6"
+                                            Margin="0,0,6,4" />
+                                    <Button Content="Item"
+                                            Command="{Binding UseTestSampleCommand}"
+                                            CommandParameter="2"
+                                            Style="{StaticResource StretchButton}"
+                                            Width="Auto"
+                                            Padding="12,6"
+                                            Margin="0,0,6,4" />
+                                    <Button Content="Long story"
+                                            Command="{Binding UseTestSampleCommand}"
+                                            CommandParameter="3"
+                                            Style="{StaticResource StretchButton}"
+                                            Width="Auto"
+                                            Padding="12,6"
+                                            Margin="0,0,0,4" />
+                                </WrapPanel>
+                                <Button Command="{Binding RunTestCommand}"
+                                        Style="{StaticResource PlayToggleButton}"
+                                        Margin="0,0,0,10">
+                                    <TextBlock Text="Test"
+                                               FontWeight="SemiBold"
+                                               FontSize="14" />
+                                </Button>
+                                <TextBlock Text="{Binding TestStatusMessage}"
+                                           Style="{StaticResource HintText}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CardBorder}">
+                            <Expander Header="Translation result"
+                                      IsExpanded="True"
+                                      Foreground="{DynamicResource PrimaryTextBrush}">
+                                <StackPanel Margin="0,12,0,0">
+                                    <TextBlock Text="Arabic" Style="{StaticResource InputLabel}" />
+                                    <TextBox Text="{Binding TestTranslatedText, Mode=OneWay}"
+                                             IsReadOnly="True"
+                                             TextWrapping="Wrap"
+                                             MinHeight="52"
+                                             FlowDirection="RightToLeft"
+                                             VerticalScrollBarVisibility="Auto" />
+                                </StackPanel>
+                            </Expander>
+                        </Border>
+
+                        <Border Style="{StaticResource CardBorder}">
+                            <Expander Header="Chunk details"
+                                      IsExpanded="True"
+                                      Foreground="{DynamicResource PrimaryTextBrush}">
+                                <ItemsControl ItemsSource="{Binding TestChunks}" Margin="0,12,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderBrush="{DynamicResource CardBorderBrush}"
+                                                    BorderThickness="0,0,0,1"
+                                                    Padding="0,8"
+                                                    Margin="0,0,0,4">
+                                                <StackPanel>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                                        <TextBlock Text="{Binding StatusIcon}"
+                                                                   FontSize="14"
+                                                                   FontWeight="Bold"
+                                                                   VerticalAlignment="Center"
+                                                                   Margin="0,0,6,0" />
+                                                        <TextBlock FontSize="12"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                   VerticalAlignment="Center">
+                                                            <Run Text="Chunk " /><Run Text="{Binding Index, Mode=OneWay}" />
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding OriginalText}"
+                                                               FontSize="12"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                               TextWrapping="Wrap"
+                                                               Margin="20,0,0,2" />
+                                                    <TextBlock Text="{Binding TranslatedText}"
+                                                               FontSize="13"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource PrimaryTextBrush}"
+                                                               FlowDirection="RightToLeft"
+                                                               TextWrapping="Wrap"
+                                                               Margin="20,0,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Expander>
                         </Border>
                     </StackPanel>
                 </Grid>

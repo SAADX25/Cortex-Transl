@@ -11,4 +11,5 @@ dist/
 .dotnet-sdk/
 .nuget/
 .dotnet-home/
+tools/
 Cortex_Dev.bat

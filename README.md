@@ -34,13 +34,13 @@ dotnet run --project src/CortexTransl.App
 
 ## نسخة للتثبيت على أجهزة المستخدمين
 
-ابنِ مثبت V1.2.0 (64-بت، معه .NET وملفات العربية إن وُجدت على الجهاز):
+ابنِ مثبت V1.3.0 (64-بت، معه .NET وملفات العربية إن وُجدت على الجهاز):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File pack.ps1
 ```
 
-المثبت يخرج إلى `dist/CortexTransl-1.2.0-Setup.exe`. ثبّته ثم افتح **Cortex Transl** من قائمة ابدأ.
+المثبت يخرج إلى `dist/CortexTransl-1.3.0-Setup.exe`. ثبّته ثم افتح **Cortex Transl** من قائمة ابدأ.
 
 النشر بدون مثبت:
 

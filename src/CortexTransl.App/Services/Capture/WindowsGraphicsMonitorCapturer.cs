@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
+using Windows.Foundation.Metadata;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
@@ -49,6 +50,41 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
 
     public nint Monitor => _monitor;
 
+    private static void TryRequestBorderlessAccess()
+    {
+        try
+        {
+            if (!ApiInformation.IsTypePresent("Windows.Graphics.Capture.GraphicsCaptureAccess"))
+            {
+                return;
+            }
+
+            GraphicsCaptureAccess
+                .RequestAccessAsync(GraphicsCaptureAccessKind.Borderless)
+                .AsTask()
+                .Wait(TimeSpan.FromMilliseconds(800));
+        }
+        catch
+        {
+        }
+    }
+
+    private static void HideYellowCaptureBorder(GraphicsCaptureSession session)
+    {
+        try
+        {
+            if (ApiInformation.IsPropertyPresent(
+                    "Windows.Graphics.Capture.GraphicsCaptureSession",
+                    "IsBorderRequired"))
+            {
+                session.IsBorderRequired = false;
+            }
+        }
+        catch
+        {
+        }
+    }
+
     public static WindowsGraphicsMonitorCapturer? TryCreate(nint monitor)
     {
         if (monitor == nint.Zero || !GraphicsCaptureSession.IsSupported())
@@ -87,6 +123,8 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
                 throw new InvalidOperationException("Monitor capture size is invalid.");
             }
 
+            TryRequestBorderlessAccess();
+
             framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
                 winRtDevice,
                 DirectXPixelFormat.B8G8R8A8UIntNormalized,
@@ -94,6 +132,7 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
                 item.Size);
             session = framePool.CreateCaptureSession(item);
             session.IsCursorCaptureEnabled = false;
+            HideYellowCaptureBorder(session);
 
             return new WindowsGraphicsMonitorCapturer(
                 monitor,

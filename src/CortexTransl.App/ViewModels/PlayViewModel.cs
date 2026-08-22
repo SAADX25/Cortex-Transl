@@ -6,6 +6,7 @@ using CortexTransl.App.Services.Profiles;
 using CortexTransl.App.Services.Settings;
 using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
+using System.Diagnostics;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Threading;
@@ -53,6 +54,10 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private bool _disposed;
     private string _selectedNavPage = "play";
     private CancellationTokenSource? _playCts;
+    private string _testInputText = string.Empty;
+    private string _testTranslatedText = string.Empty;
+    private string _testStatusMessage = "Type or paste English text, then press Test to check translation quality.";
+    private bool _isTestRunning;
 
     public PlayViewModel(
         DatabaseMigrator databaseMigrator,
@@ -83,6 +88,8 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         DeletePresetCommand = new AsyncRelayCommand(
             parameter => DeletePresetAsync(parameter as GameProfile),
             parameter => parameter is GameProfile);
+        RunTestCommand = new AsyncRelayCommand(_ => RunTranslationTestAsync(), _ => CanRunTest());
+        UseTestSampleCommand = new RelayCommand(parameter => UseTestSample(parameter as string), _ => !_isTestRunning);
     }
 
     public event EventHandler? MinimizeRequested;
@@ -139,6 +146,12 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     public RelayCommand UsePresetCommand { get; }
 
     public AsyncRelayCommand DeletePresetCommand { get; }
+
+    public AsyncRelayCommand RunTestCommand { get; }
+
+    public RelayCommand UseTestSampleCommand { get; }
+
+    public ObservableCollection<TestChunkResult> TestChunks { get; } = [];
 
     public CaptureRegion SelectedRegion
     {
@@ -452,12 +465,19 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         set { if (value) SelectedNavPage = "presets"; }
     }
 
+    public bool IsNavTest
+    {
+        get => _selectedNavPage == "test";
+        set { if (value) SelectedNavPage = "test"; }
+    }
+
     public string NavPageTitle => _selectedNavPage switch
     {
         "key" => "Translation engine",
         "region" => "Capture region",
         "look" => "Overlay look",
         "presets" => "Presets",
+        "test" => "Test translation",
         _ => "Play"
     };
 
@@ -467,6 +487,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         "region" => "Story box or menu labels.",
         "look" => "Size, color, position, and opacity.",
         "presets" => "Save a game setup and tap to load it.",
+        "test" => "Check translation quality and find issues.",
         _ => "Pick story or menus, then start translation."
     };
 
@@ -527,6 +548,43 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     public void SetStatusMessage(string message)
     {
         StatusMessage = message;
+    }
+
+    public string TestInputText
+    {
+        get => _testInputText;
+        set
+        {
+            if (SetProperty(ref _testInputText, value))
+            {
+                RunTestCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public string TestTranslatedText
+    {
+        get => _testTranslatedText;
+        private set => SetProperty(ref _testTranslatedText, value);
+    }
+
+    public string TestStatusMessage
+    {
+        get => _testStatusMessage;
+        private set => SetProperty(ref _testStatusMessage, value);
+    }
+
+    public bool IsTestRunning
+    {
+        get => _isTestRunning;
+        private set
+        {
+            if (SetProperty(ref _isTestRunning, value))
+            {
+                RunTestCommand.RaiseCanExecuteChanged();
+                UseTestSampleCommand.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     public bool IsPlaying
@@ -1186,8 +1244,127 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsNavRegion));
         OnPropertyChanged(nameof(IsNavLook));
         OnPropertyChanged(nameof(IsNavPresets));
+        OnPropertyChanged(nameof(IsNavTest));
         OnPropertyChanged(nameof(NavPageTitle));
         OnPropertyChanged(nameof(NavPageSubtitle));
+    }
+
+    private bool CanRunTest()
+    {
+        return !_isTestRunning && !string.IsNullOrWhiteSpace(_testInputText) && CanTranslate;
+    }
+
+    private static readonly string[] TestSamples =
+    [
+        "The knight stood at the edge of the cliff, staring into the abyss below. \"We have no choice,\" she said, gripping her sword tightly. \"If we don't cross now, the kingdom will fall before dawn.\"",
+        "Welcome to the village of Eldergrove. The blacksmith can forge new weapons. Visit the inn to rest and save your progress. The merchant sells potions and scrolls.",
+        "You have obtained the Crystal of Shadows. This ancient relic holds the power to reveal hidden paths. Use it near mysterious walls to uncover secret passages. Be warned — its power draws the attention of dark creatures.",
+        "Long ago, the four kingdoms lived in harmony. But when the Dragon King awakened from his thousand-year slumber, war spread across the land. Now, only one hero remains who can unite the kingdoms and seal the dragon away forever. Your journey begins at the Temple of Dawn, where the Elder will grant you the first seal."
+    ];
+
+    private void UseTestSample(string? indexStr)
+    {
+        if (int.TryParse(indexStr, out var index) && index >= 0 && index < TestSamples.Length)
+        {
+            TestInputText = TestSamples[index];
+        }
+    }
+
+    private async Task RunTranslationTestAsync()
+    {
+        if (_isTestRunning || string.IsNullOrWhiteSpace(_testInputText))
+        {
+            return;
+        }
+
+        IsTestRunning = true;
+        TestTranslatedText = string.Empty;
+        TestStatusMessage = "Translating...";
+        TestChunks.Clear();
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var sourceText = _testInputText.Trim();
+            var chunks = TranslationChunker.Split(sourceText);
+            if (!_translationProviderSettings.UseOfflineEngine)
+            {
+                TestStatusMessage = "Switch to offline engine first. Test mode uses the offline Arabic files.";
+                return;
+            }
+
+            IReadOnlyList<string> translations;
+            try
+            {
+                translations = await _offlineProvider.TranslateManyAsync(
+                    chunks, SourceLanguage, TargetLanguage);
+            }
+            catch (TranslationProviderException ex)
+            {
+                TestStatusMessage = $"Translation failed: {ex.Message}";
+                return;
+            }
+
+            var emptyCount = 0;
+            var totalChunks = chunks.Count;
+
+            for (var i = 0; i < totalChunks; i++)
+            {
+                var translated = i < translations.Count ? translations[i] : string.Empty;
+                if (string.IsNullOrWhiteSpace(translated))
+                {
+                    emptyCount++;
+                }
+
+                TestChunks.Add(new TestChunkResult
+                {
+                    Index = i + 1,
+                    OriginalText = chunks[i],
+                    TranslatedText = translated
+                });
+            }
+
+            var fullTranslation = TranslationChunker.Join(translations);
+            TestTranslatedText = fullTranslation;
+            sw.Stop();
+
+            var sourceLen = sourceText.Length;
+            var translatedLen = fullTranslation.Length;
+            var ratio = sourceLen > 0 ? (double)translatedLen / sourceLen : 0;
+
+            var issues = new List<string>();
+            if (string.IsNullOrWhiteSpace(fullTranslation))
+            {
+                issues.Add("Translation is completely empty");
+            }
+            else if (ratio < 0.3)
+            {
+                issues.Add($"Translation is very short ({ratio:P0} of original length)");
+            }
+
+            if (emptyCount > 0)
+            {
+                issues.Add($"{emptyCount}/{totalChunks} chunks returned empty");
+            }
+
+            if (issues.Count == 0)
+            {
+                TestStatusMessage = $"✓ All {totalChunks} chunks translated successfully in {sw.ElapsedMilliseconds}ms. " +
+                                    $"Source: {sourceLen} chars → Arabic: {translatedLen} chars ({ratio:P0}).";
+            }
+            else
+            {
+                TestStatusMessage = $"⚠ Issues found ({sw.ElapsedMilliseconds}ms): {string.Join(". ", issues)}.";
+            }
+        }
+        catch (Exception ex)
+        {
+            TestStatusMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            IsTestRunning = false;
+        }
     }
 
     private bool CanDownloadModel()

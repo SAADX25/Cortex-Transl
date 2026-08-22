@@ -4,7 +4,7 @@ namespace CortexTransl.App.Utils;
 
 public static partial class TranslationChunker
 {
-    private const int MaxChunkLength = 180;
+    private const int MaxChunkLength = 350;
 
     public static IReadOnlyList<string> Split(string text)
     {

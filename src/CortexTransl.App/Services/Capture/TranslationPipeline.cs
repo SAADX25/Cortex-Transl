@@ -204,6 +204,22 @@ public sealed class TranslationPipeline
             sourceLanguage,
             targetLanguage,
             cancellationToken);
+
+        // If any chunk came back empty, retry the whole text as one block
+        var hasEmpty = translations.Any(t => string.IsNullOrWhiteSpace(t));
+        if (hasEmpty)
+        {
+            var fallback = await _translationProvider.TranslateAsync(
+                originalText,
+                sourceLanguage,
+                targetLanguage,
+                cancellationToken);
+            if (!string.IsNullOrWhiteSpace(fallback))
+            {
+                return fallback;
+            }
+        }
+
         return TranslationChunker.Join(translations);
     }
 
