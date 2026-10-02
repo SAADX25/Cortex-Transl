@@ -4,7 +4,7 @@
 
 **Real-time game dialogue translation overlay for Windows — fully offline**
 
-[![Version](https://img.shields.io/badge/version-1.5.0-6366f1?style=for-the-badge)](https://github.com/SAADX25/Cortex-Transl/releases)
+[![Version](https://img.shields.io/badge/version-1.6.0-6366f1?style=for-the-badge)](https://github.com/SAADX25/Cortex-Transl/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?style=for-the-badge&logo=windows)](https://www.microsoft.com/windows)
 [![Framework](https://img.shields.io/badge/.NET-10.0-512bd4?style=for-the-badge&logo=dotnet)](https://dotnet.microsoft.com/)
 [![License](https://img.shields.io/badge/license-Private-ff4444?style=for-the-badge)](#)
@@ -215,12 +215,12 @@ dotnet restore
 dotnet run --project src/CortexTransl.App
 ```
 
-### Build the installer (v1.5.0)
+### Build the installer (v1.6.0)
 
 ```powershell
 # Publishes, packages, and compiles Setup.exe
 powershell -ExecutionPolicy Bypass -File pack.ps1
-# Output: dist\CortexTransl-1.5.0-Setup.exe
+# Output: dist\CortexTransl-1.6.0-Setup.exe
 ```
 
 ### Publish without installer
@@ -263,6 +263,6 @@ The app stores its data at:
 
 <div align="center">
 
-Built with ❤️ for Arabic gamers — **Cortex Transl v1.5.0**
+Built with ❤️ for Arabic gamers — **Cortex Transl v1.6.0**
 
 </div>
