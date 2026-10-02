@@ -1,4 +1,5 @@
 using BergamotTranslatorSharp;
+using CortexTransl.App.Utils;
 
 namespace CortexTransl.App.Services.Translation;
 
@@ -16,6 +17,8 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
 
     public string Id => "offline";
 
+    public bool SupportsContextualLongText => false;
+
     public bool IsEnglishArabicReady => _installer.IsPairReady("en-ar");
 
     public async Task EnsureReadyAsync(
@@ -30,9 +33,10 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
         string text,
         string sourceLanguage,
         string targetLanguage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TranslationContentKind contentKind = TranslationContentKind.General)
     {
-        var translations = await TranslateManyAsync([text], sourceLanguage, targetLanguage, cancellationToken);
+        var translations = await TranslateManyAsync([text], sourceLanguage, targetLanguage, cancellationToken, contentKind);
         return translations.Count > 0 ? translations[0] : string.Empty;
     }
 
@@ -40,7 +44,8 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
         IReadOnlyList<string> texts,
         string sourceLanguage,
         string targetLanguage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TranslationContentKind contentKind = TranslationContentKind.General)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (texts.Count == 0)
@@ -48,10 +53,36 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
             return [];
         }
 
+        var useUiTerms = contentKind == TranslationContentKind.UiLabel
+            && (sourceLanguage.Equals("en", StringComparison.OrdinalIgnoreCase) || sourceLanguage.StartsWith("en-", StringComparison.OrdinalIgnoreCase))
+            && (targetLanguage.Equals("ar", StringComparison.OrdinalIgnoreCase) || targetLanguage.StartsWith("ar-", StringComparison.OrdinalIgnoreCase));
+        var results = new string[texts.Count];
+        var remaining = new List<int>();
+        for (var index = 0; index < texts.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(texts[index]))
+            {
+                results[index] = string.Empty;
+            }
+            else if (useUiTerms && ArabicUiLabels.TryTranslate(texts[index], out var label))
+            {
+                results[index] = label;
+            }
+            else
+            {
+                remaining.Add(index);
+            }
+        }
+
+        if (remaining.Count == 0)
+        {
+            return results;
+        }
+
         await _installer.EnsureReadyAsync(sourceLanguage, targetLanguage, cancellationToken: cancellationToken);
         return await Task.Run(() =>
         {
-            var results = new string[texts.Count];
             lock (_gate)
             {
                 if (_disposed)
@@ -62,13 +93,11 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
                 }
 
                 var service = GetService(sourceLanguage, targetLanguage);
-                for (var index = 0; index < texts.Count; index++)
+                foreach (var index in remaining)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var text = texts[index];
-                    results[index] = string.IsNullOrWhiteSpace(text)
-                        ? string.Empty
-                        : TranslateText(service, text);
+                    var text = useUiTerms ? ArabicUiLabels.Normalize(texts[index]) : texts[index];
+                    results[index] = TranslateText(service, text);
                 }
             }
 

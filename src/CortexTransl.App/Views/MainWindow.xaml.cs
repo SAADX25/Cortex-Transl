@@ -17,6 +17,7 @@ namespace CortexTransl.App.Views;
 public partial class MainWindow : Window
 {
     private static readonly TimeSpan F10DebounceInterval = TimeSpan.FromMilliseconds(280);
+    private const ModifierKeys RegionHotkeyModifiers = ModifierKeys.None;
 
     private readonly GlobalHotkeyService _hotkeyService = new();
     private readonly PlayViewModel _viewModel;
@@ -69,9 +70,9 @@ public partial class MainWindow : Window
                 ApiKeyPasswordBox.Password = _viewModel.DeepLApiKey;
             }
 
-            _hotkeyService.Register(this, Key.F8);
-            _hotkeyService.Register(this, Key.F9);
-            _hotkeyService.Register(this, Key.F10);
+            RegisterHotkey(Key.F8);
+            RegisterHotkey(Key.F9, RegionHotkeyModifiers);
+            RegisterHotkey(Key.F10);
             _hotkeyService.HotkeyPressed += OnHotkeyPressed;
         }
         catch (Exception ex)
@@ -103,7 +104,7 @@ public partial class MainWindow : Window
             {
                 await _viewModel.HandleF8Async();
             }
-            else if (e.Key == Key.F9)
+            else if (e.Key == Key.F9 && e.Modifiers == RegionHotkeyModifiers)
             {
                 await SelectRegionFromHotkeyAsync();
             }
@@ -121,6 +122,11 @@ public partial class MainWindow : Window
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.System || Keyboard.Modifiers != ModifierKeys.None)
+        {
+            return;
+        }
+
         if ((e.Key == Key.System && e.SystemKey == Key.F10) || e.Key == Key.F10)
         {
             e.Handled = true;
@@ -132,14 +138,20 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.Key is Key.F8 or Key.F9)
+        if (e.Key == Key.F8)
         {
             e.Handled = true;
-            if (e.Key == Key.F8 && !_hotkeyService.IsRegistered(Key.F8))
+            if (!_hotkeyService.IsRegistered(Key.F8))
             {
                 _ = _viewModel.HandleF8Async();
             }
-            else if (e.Key == Key.F9 && !_hotkeyService.IsRegistered(Key.F9))
+            return;
+        }
+
+        if (e.Key == Key.F9 && Keyboard.Modifiers == RegionHotkeyModifiers)
+        {
+            e.Handled = true;
+            if (!_hotkeyService.IsRegistered(Key.F9, RegionHotkeyModifiers))
             {
                 _ = SelectRegionFromHotkeyAsync();
             }
@@ -163,6 +175,17 @@ public partial class MainWindow : Window
                 Activate();
             }
         }
+    }
+
+    private void RegisterHotkey(Key key, ModifierKeys modifiers = ModifierKeys.None)
+    {
+        if (_hotkeyService.Register(this, key, modifiers))
+        {
+            return;
+        }
+
+        var chord = modifiers == ModifierKeys.None ? key.ToString() : $"{modifiers}+{key}";
+        AppLog.Write("hotkey-registration", $"Could not register {chord}. Win32 error: {_hotkeyService.LastRegistrationError}.");
     }
 
     private void ToggleProgramWindow()

@@ -1,4 +1,5 @@
 using CortexTransl.App.Models;
+using CortexTransl.App.Utils;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,6 +10,7 @@ namespace CortexTransl.App.Services.Settings;
 public sealed class AppSettingsService
 {
     private readonly string _settingsFilePath;
+    private readonly SemaphoreSlim _saveLock = new(1, 1);
 
     public AppSettingsService(string dataDirectory)
     {
@@ -24,26 +26,78 @@ public sealed class AppSettingsService
 
         try
         {
-            using var stream = new FileStream(_settingsFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var stream = new FileStream(
+                _settingsFilePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
             var settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, cancellationToken: cancellationToken);
             return settings ?? new AppSettings();
         }
-        catch
+        catch (OperationCanceledException)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("settings-load", ex);
             return new AppSettings();
         }
     }
 
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
+        await _saveLock.WaitAsync(cancellationToken);
+        var temporaryPath = _settingsFilePath + ".tmp";
         try
         {
-            using var stream = new FileStream(_settingsFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
-            await JsonSerializer.SerializeAsync(stream, settings, new JsonSerializerOptions { WriteIndented = true }, cancellationToken);
+            var directory = Path.GetDirectoryName(_settingsFilePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            await using (var stream = new FileStream(
+                             temporaryPath,
+                             FileMode.Create,
+                             FileAccess.Write,
+                             FileShare.None,
+                             4096,
+                             FileOptions.Asynchronous))
+            {
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    settings,
+                    new JsonSerializerOptions { WriteIndented = true },
+                    cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+
+            File.Move(temporaryPath, _settingsFilePath, overwrite: true);
         }
-        catch
+        catch (OperationCanceledException)
         {
-            // Fail silently or log
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("settings-save", ex);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("settings-temp-cleanup", ex);
+            }
+
+            _saveLock.Release();
         }
     }
 

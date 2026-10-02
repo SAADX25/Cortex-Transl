@@ -29,7 +29,7 @@
 | 🎨 **Customizable** | Font size, color, opacity, and overlay position |
 | 🧪 **TEST Mode** | Evaluate translation quality with per-chunk analysis |
 | 📋 **Presets** | Save a game setup and load it with one click |
-| 🔑 **DeepL (optional)** | Connect a DeepL API key for higher translation quality |
+| 🔑 **DeepL (optional)** | Context-aware Arabic for story dialogue and game menus |
 
 ---
 
@@ -40,7 +40,13 @@
 2. Run your game in Borderless Windowed mode
 3. Press F9 and drag around the dialogue box
 4. Press F8 or click Start to begin translating
+
+For offline translation, choose the game's language explicitly. DeepL can detect the source language automatically.
 ```
+
+Offline English menus use Arabic UI terminology for common game commands and desktop labels, and preserve known product names such as Steam and Brave. Known captions wrapped across two or three lines are translated as one label. Unknown labels still use the offline translation model; this does not guarantee accurate terminology for every game. Menu results use a separate cache version so earlier literal translations are not reused.
+
+The translation overlay is recordable, including by NVIDIA recording. Text is captured from the underlying window without Windows capture-protection flags. Desktop icons also support direct capture from Explorer's icon view, keeping translated labels over the original names. Menu mode never moves labels away from their source: if direct capture is unavailable, it retains the last translation and reports a capture error. Dialogue mode can use a desktop fallback that places the translation beside the selected region without repeatedly hiding it. Direct capture restores the original placement when it becomes available again.
 
 ### ⌨️ Keyboard Shortcuts
 
@@ -49,6 +55,8 @@
 | `F8` | Start / Stop translation |
 | `F9` | Select dialogue region |
 | `F10` | Show / Hide the app window |
+
+These shortcuts require the function key alone. Modified combinations such as NVIDIA's Alt+F9 do not run Cortex's region-selection handler.
 
 ---
 
@@ -87,7 +95,8 @@ Cortex Transl/
 │       │   ├── 📁 Capture/              # Screen capture & processing
 │       │   │   ├── TranslationPipeline.cs            # Main orchestrator (OCR→Translate→Display)
 │       │   │   ├── ScreenCaptureService.cs            # Screen capture service
-│       │   │   ├── WindowsGraphicsMonitorCapturer.cs  # Windows Graphics Capture API
+│       │   │   ├── WindowsGraphicsWindowCapturer.cs   # Direct game-window capture
+│       │   │   ├── CaptureWindowTarget.cs             # Find the window below the overlay
 │       │   │   ├── GdiScreenCapture.cs                # GDI fallback
 │       │   │   ├── RegionSelectionService.cs          # Capture region picker
 │       │   │   ├── ScreenCoordinates.cs               # DPI/coordinate helpers
@@ -118,6 +127,7 @@ Cortex Transl/
 │       │       ├── DeepLTranslationProvider.cs             # DeepL API
 │       │       ├── RoutingTranslationProvider.cs           # Provider selector
 │       │       ├── OfflineModelInstaller.cs                # Arabic model downloader
+│       │       ├── TranslationContentKind.cs               # Dialogue/menu translation context
 │       │       └── TranslationProviderSettings.cs
 │       │
 │       ├── 📁 Utils/                    # Helper utilities

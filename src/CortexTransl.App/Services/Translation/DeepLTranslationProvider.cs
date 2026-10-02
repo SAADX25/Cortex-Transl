@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CortexTransl.App.Services.Translation;
@@ -12,9 +12,11 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
     private const int MaximumRequestBytes = 128 * 1024;
     private const int MaximumBatchSize = 40;
     private const string GameDialogueContext =
-        "Spoken video-game story dialogue. Translate into natural Arabic a player can read quickly. Keep character names and every clause. Do not add extra sentences.";
+        "Video-game story dialogue. Translate into clear, natural Modern Standard Arabic suitable for subtitles. Preserve the full meaning, intent, emotion, and every detail. Avoid literal calques and keep the wording concise and easy to understand. Keep established character, place, and item names consistent; do not add explanations or omit content.";
     private const string GameMenuContext =
-        "Short video-game or desktop UI labels under icons and on buttons. Translate into concise Arabic. Keep brand names when they are commonly left in English. Do not add extra words.";
+        "Video-game menu and button labels. Translate into concise, natural Modern Standard Arabic that fits a game UI. Use clear action wording for commands and short noun phrases for menu names. Keep established names and brands consistent. Do not add explanations or extra words.";
+    private const string GeneralArabicContext =
+        "Translate into clear, natural Modern Standard Arabic. Preserve meaning, tone, names, and all details. Do not add explanations or omit content.";
     private readonly TranslationProviderSettings _settings;
     private readonly HttpClient _httpClient;
 
@@ -24,15 +26,18 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
     }
 
-    public string Id => "deepl";
+    public string Id => "deepl-ar-context-v2";
+
+    public bool SupportsContextualLongText => true;
 
     public async Task<string> TranslateAsync(
         string text,
         string sourceLanguage,
         string targetLanguage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TranslationContentKind contentKind = TranslationContentKind.General)
     {
-        var translations = await TranslateManyAsync([text], sourceLanguage, targetLanguage, cancellationToken);
+        var translations = await TranslateManyAsync([text], sourceLanguage, targetLanguage, cancellationToken, contentKind);
         return translations.Count > 0 ? translations[0] : string.Empty;
     }
 
@@ -40,7 +45,8 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         IReadOnlyList<string> texts,
         string sourceLanguage,
         string targetLanguage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TranslationContentKind contentKind = TranslationContentKind.General)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -85,6 +91,7 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
                 sourceLanguage,
                 targetLanguage,
                 apiKey,
+                contentKind,
                 cancellationToken);
 
             if (translatedBatch.Length != batchTexts.Length)
@@ -108,6 +115,7 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         string sourceLanguage,
         string targetLanguage,
         string apiKey,
+        TranslationContentKind contentKind,
         CancellationToken cancellationToken)
     {
         var payload = new DeepLTranslateRequest
@@ -116,7 +124,12 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
             TargetLanguage = MapLanguage(targetLanguage, isTarget: true),
             SplitSentences = "0",
             PreserveFormatting = true,
-            Context = texts.All(static text => text.Length <= 48) ? GameMenuContext : GameDialogueContext
+            Context = contentKind switch
+            {
+                TranslationContentKind.GameDialogue => GameDialogueContext,
+                TranslationContentKind.UiLabel => GameMenuContext,
+                _ => GeneralArabicContext
+            }
         };
 
         if (!sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
@@ -124,8 +137,8 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
             payload.SourceLanguage = MapLanguage(sourceLanguage, isTarget: false);
         }
 
-        var estimatedBytes = texts.Sum(text => Encoding.UTF8.GetByteCount(text)) + 256;
-        if (estimatedBytes > MaximumRequestBytes)
+        var requestBody = JsonSerializer.SerializeToUtf8Bytes(payload);
+        if (requestBody.Length > MaximumRequestBytes)
         {
             throw new TranslationProviderException(
                 "The text is too large for one DeepL request.",
@@ -138,8 +151,9 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = JsonContent.Create(payload)
+            Content = new ByteArrayContent(requestBody)
         };
+        httpRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         httpRequest.Headers.Authorization = new AuthenticationHeaderValue("DeepL-Auth-Key", apiKey);
         httpRequest.Headers.UserAgent.ParseAdd("CortexTransl/1.0");
 

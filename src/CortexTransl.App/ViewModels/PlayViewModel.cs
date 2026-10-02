@@ -42,7 +42,6 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private string _overlayTextSize = "medium";
     private string _overlayTextColor = "white";
     private bool _minimizeDuringPlay;
-    private double _autoTranslateIntervalMs = 320;
     private string _profileName = string.Empty;
     private GameProfile? _selectedProfile;
     private string _originalText = string.Empty;
@@ -94,7 +93,18 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     public event EventHandler? MinimizeRequested;
 
-    public IReadOnlyList<OptionItem> SourceLanguageOptions { get; } =
+    private static readonly IReadOnlyList<OptionItem> OfflineSourceLanguageOptions =
+    [
+        new("en", "English"),
+        new("ja", "Japanese"),
+        new("ko", "Korean"),
+        new("zh-Hans", "Chinese"),
+        new("fr", "French"),
+        new("de", "German"),
+        new("es", "Spanish")
+    ];
+
+    private static readonly IReadOnlyList<OptionItem> DeepLSourceLanguageOptions =
     [
         new("en", "English"),
         new("ja", "Japanese"),
@@ -103,8 +113,15 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         new("fr", "French"),
         new("de", "German"),
         new("es", "Spanish"),
-        new("auto", "Auto")
+        new("auto", "Auto-detect")
     ];
+
+    public IReadOnlyList<OptionItem> SourceLanguageOptions =>
+        IsDeepLEngine ? DeepLSourceLanguageOptions : OfflineSourceLanguageOptions;
+
+    public string SourceLanguageHint => IsDeepLEngine
+        ? "Auto-detect is available with DeepL."
+        : "Choose the game's language; offline translation cannot auto-detect it.";
 
     public IReadOnlyList<OptionItem> TranslationEngineOptions { get; } =
     [
@@ -207,7 +224,13 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         get => _sourceLanguage;
         set
         {
-            if (SetProperty(ref _sourceLanguage, value))
+            var normalized = string.IsNullOrWhiteSpace(value) ? "en" : value.Trim();
+            if (IsOfflineEngine && normalized.Equals("auto", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = "en";
+            }
+
+            if (SetProperty(ref _sourceLanguage, normalized))
             {
                 _pipeline.Reset();
                 _ = SaveSettingsAsync();
@@ -266,15 +289,23 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                 _pipeline.Reset();
                 OnPropertyChanged(nameof(IsOfflineEngine));
                 OnPropertyChanged(nameof(IsDeepLEngine));
+                OnPropertyChanged(nameof(SourceLanguageOptions));
+                OnPropertyChanged(nameof(SourceLanguageHint));
                 OnPropertyChanged(nameof(CanTranslate));
                 OnPropertyChanged(nameof(SessionBadgeText));
                 TogglePlayCommand.RaiseCanExecuteChanged();
                 DownloadOfflineModelCommand.RaiseCanExecuteChanged();
-                _ = SaveSettingsAsync();
                 if (IsOfflineEngine)
                 {
+                    if (_sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SourceLanguage = "en";
+                    }
+
                     _ = EnsureOfflineModelAsync();
                 }
+
+                _ = SaveSettingsAsync();
             }
         }
     }
@@ -503,8 +534,6 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
     }
 
-    public bool SuppressAutoCapture { get; set; }
-
     public bool HasProfiles => Profiles.Count > 0;
 
     public bool HasNoProfiles => Profiles.Count == 0;
@@ -621,13 +650,14 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         _overlayTextSize = NormalizeOverlayTextSize(settings.OverlayTextSize);
         _overlayTextColor = OverlayTextColors.Normalize(settings.OverlayTextColor);
         _minimizeDuringPlay = settings.MinimizeDuringPlay;
-        _autoTranslateIntervalMs = settings.AutoTranslateIntervalMs <= 0 || settings.AutoTranslateIntervalMs >= 500
-            ? 320
-            : settings.AutoTranslateIntervalMs;
         _useDeepLFreeApi = settings.UseDeepLFreeApi;
         _translationEngine = string.Equals(settings.TranslationEngine, "deepl", StringComparison.OrdinalIgnoreCase)
             ? "deepl"
             : "offline";
+        if (IsOfflineEngine && _sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            _sourceLanguage = "en";
+        }
         _profileName = settings.ProfileName;
         _deepLApiKey = _appSettingsService.DecryptApiKey(settings.EncryptedDeepLApiKey);
         _translationProviderSettings.DeepLApiKey = _deepLApiKey;
@@ -641,6 +671,8 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
 
         OnPropertyChanged(nameof(SourceLanguage));
+        OnPropertyChanged(nameof(SourceLanguageOptions));
+        OnPropertyChanged(nameof(SourceLanguageHint));
         OnPropertyChanged(nameof(OverlayPlacement));
         OnPropertyChanged(nameof(TranslationMode));
         OnPropertyChanged(nameof(IsListMode));
@@ -683,7 +715,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         {
             StatusMessage = IsOfflineReady
                 ? SelectedRegion.IsEmpty
-                    ? "Select the dialogue region, then press F8."
+                    ? "Select the dialogue region with F9, then press F8."
                     : "Ready. F8 starts translation. F10 opens the menu."
                 : "Downloading Arabic translation files...";
             _ = EnsureOfflineModelAsync();
@@ -692,7 +724,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         {
             StatusMessage = HasApiKey
                 ? SelectedRegion.IsEmpty
-                    ? "Select the dialogue region, then press F8."
+                    ? "Select the dialogue region with F9, then press F8."
                     : "Ready. F8 starts translation. F10 opens the menu."
                 : "Paste your DeepL API key, then select the dialogue region.";
         }
@@ -836,10 +868,34 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var skipped = false;
             while (!token.IsCancellationRequested)
             {
-                skipped = await RunTurnAsync(token);
+                bool skipped;
+                try
+                {
+                    skipped = await RunTurnAsync(token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException) when (_disposed)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Write("play-turn", ex);
+                    skipped = true;
+                    RunOnUi(() =>
+                    {
+                        if (!_disposed && IsPlaying)
+                        {
+                            StatusMessage = "Temporary capture or translation error. Retrying...";
+                        }
+                    });
+                }
+
                 var delay = skipped ? 360 : 120;
                 await Task.Delay(delay, token);
             }
@@ -868,7 +924,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     private async Task<bool> RunTurnAsync(CancellationToken cancellationToken)
     {
-        if (_disposed || SuppressAutoCapture)
+        if (_disposed)
         {
             return true;
         }
@@ -1119,8 +1175,16 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     private void ApplyPreset(GameProfile profile)
     {
-        _selectedRegion = profile.Region;
+        _translationEngine = string.Equals(profile.TranslationProvider, "deepl", StringComparison.OrdinalIgnoreCase)
+            ? "deepl"
+            : "offline";
+        _translationProviderSettings.TranslationEngine = _translationEngine;
+        _selectedRegion = ScreenCoordinates.ClampToVirtualScreen(profile.Region);
         _sourceLanguage = string.IsNullOrWhiteSpace(profile.SourceLanguage) ? "en" : profile.SourceLanguage;
+        if (IsOfflineEngine && _sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            _sourceLanguage = "en";
+        }
         _translationMode = NormalizeTranslationMode(profile.TranslationMode);
         _overlayPlacement = NormalizeOverlayPlacement(profile.OverlayPlacement);
         _overlayBackgroundOpacity = profile.OverlayBackgroundOpacity <= 0 ? 0.88 : Math.Clamp(profile.OverlayBackgroundOpacity, 0.6, 0.95);
@@ -1134,6 +1198,12 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedRegionDisplay));
         OnPropertyChanged(nameof(HasRegion));
         OnPropertyChanged(nameof(SessionBadgeText));
+        OnPropertyChanged(nameof(TranslationEngine));
+        OnPropertyChanged(nameof(IsOfflineEngine));
+        OnPropertyChanged(nameof(IsDeepLEngine));
+        OnPropertyChanged(nameof(SourceLanguageOptions));
+        OnPropertyChanged(nameof(SourceLanguageHint));
+        OnPropertyChanged(nameof(CanTranslate));
         OnPropertyChanged(nameof(SourceLanguage));
         OnPropertyChanged(nameof(TranslationMode));
         OnPropertyChanged(nameof(IsListMode));
@@ -1154,6 +1224,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ProfileName));
         SaveProfileCommand.RaiseCanExecuteChanged();
         TogglePlayCommand.RaiseCanExecuteChanged();
+        DownloadOfflineModelCommand.RaiseCanExecuteChanged();
 
         SelectedProfile = profile;
         _ = RefreshProfilesAsync();
@@ -1163,6 +1234,10 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
 
         _ = SaveSettingsAsync();
+        if (IsOfflineEngine)
+        {
+            _ = EnsureOfflineModelAsync();
+        }
     }
 
     private async Task RefreshProfilesAsync(CancellationToken cancellationToken = default)
@@ -1192,14 +1267,13 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             EncryptedDeepLApiKey = _appSettingsService.EncryptApiKey(_deepLApiKey),
             UseDeepLFreeApi = _useDeepLFreeApi,
             TranslationEngine = _translationEngine,
-            Theme = "Dark",
+            Theme = _themeService.CurrentTheme,
             SourceLanguage = _sourceLanguage,
             OverlayPlacement = _overlayPlacement,
             OverlayBackgroundOpacity = _overlayBackgroundOpacity,
             OverlayTextSize = _overlayTextSize,
             OverlayTextColor = _overlayTextColor,
             MinimizeDuringPlay = _minimizeDuringPlay,
-            AutoTranslateIntervalMs = _autoTranslateIntervalMs,
             RegionX = _selectedRegion.X,
             RegionY = _selectedRegion.Y,
             RegionWidth = _selectedRegion.Width,
@@ -1297,7 +1371,10 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             try
             {
                 translations = await _offlineProvider.TranslateManyAsync(
-                    chunks, SourceLanguage, TargetLanguage);
+                    chunks,
+                    SourceLanguage,
+                    TargetLanguage,
+                    contentKind: TranslationContentKind.GameDialogue);
             }
             catch (TranslationProviderException ex)
             {
@@ -1394,7 +1471,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             if (!IsPlaying)
             {
                 StatusMessage = SelectedRegion.IsEmpty
-                    ? "Arabic files ready. Select the dialogue region, then press F8."
+                    ? "Arabic files ready. Select the dialogue region with F9, then press F8."
                     : "Arabic files ready. F8 starts translation.";
             }
 

@@ -251,6 +251,10 @@
                                               DisplayMemberPath="Name"
                                               SelectedValuePath="Id"
                                               SelectedValue="{Binding SourceLanguage, Mode=TwoWay}" />
+                                    <TextBlock Text="{Binding SourceLanguageHint}"
+                                               Style="{StaticResource HintText}"
+                                               Margin="0,6,0,0"
+                                               TextWrapping="Wrap" />
                                 </StackPanel>
                                 <TextBlock Text="Arabic overlay. Use borderless windowed mode in the game."
                                            Style="{StaticResource HintText}"

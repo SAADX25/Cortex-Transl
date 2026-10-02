@@ -31,12 +31,12 @@ internal static class GraphicsCaptureInterop
     [DllImport("d3d11.dll", EntryPoint = "CreateDirect3D11DeviceFromDXGIDevice", ExactSpelling = true, PreserveSig = false)]
     private static extern void CreateDirect3D11DeviceFromDXGIDevice(nint dxgiDevice, out nint graphicsDevice);
 
-    public static GraphicsCaptureItem CreateItemForMonitor(nint monitor)
+    public static GraphicsCaptureItem CreateItemForWindow(nint window)
     {
         var factory = ActivationFactory.Get("Windows.Graphics.Capture.GraphicsCaptureItem");
         var interop = factory.AsInterface<IGraphicsCaptureItemInterop>();
         var iid = GraphicsCaptureItemIid;
-        var itemPointer = interop.CreateForMonitor(monitor, ref iid);
+        var itemPointer = interop.CreateForWindow(window, ref iid);
         try
         {
             return GraphicsCaptureItem.FromAbi(itemPointer);
@@ -62,15 +62,10 @@ internal static class GraphicsCaptureInterop
 
     public static nint GetD3D11TexturePointer(IDirect3DSurface surface)
     {
-        try
-        {
-            var access = (IDirect3DDxgiInterfaceAccess)(object)surface;
-            var iid = D3D11Texture2DIid;
-            return access.GetInterface(ref iid);
-        }
-        catch
-        {
-            return nint.Zero;
-        }
+        // The surface is a C#/WinRT projection, not a COM RCW. Query the
+        // native interface through WinRT instead of casting the managed object.
+        var access = surface.As<IDirect3DDxgiInterfaceAccess>();
+        var iid = D3D11Texture2DIid;
+        return access.GetInterface(ref iid);
     }
 }

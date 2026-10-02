@@ -10,8 +10,6 @@ public sealed class OverlayService : IOverlayService
 {
     private readonly DispatcherTimer _topmostTimer;
     private OverlayWindow? _window;
-    private CaptureRegion _pinnedRegion = CaptureRegion.Empty;
-    private OverlaySettings? _pinnedSettings;
 
     public OverlayService()
     {
@@ -33,8 +31,6 @@ public sealed class OverlayService : IOverlayService
             try
             {
                 EnsureWindow();
-                _pinnedRegion = region;
-                _pinnedSettings = settings;
                 _window!.Pin(region, settings);
 
                 if (!_window.IsVisible)
@@ -90,6 +86,7 @@ public sealed class OverlayService : IOverlayService
             if (_window?.IsVisible == true)
             {
                 _window.Hide();
+                _window.ResetCapturePlacement();
             }
         });
     }
@@ -107,8 +104,6 @@ public sealed class OverlayService : IOverlayService
             _window.AllowClose();
             _window.Close();
             _window = null;
-            _pinnedRegion = CaptureRegion.Empty;
-            _pinnedSettings = null;
         });
     }
 

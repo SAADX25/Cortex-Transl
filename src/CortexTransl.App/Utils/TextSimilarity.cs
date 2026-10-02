@@ -9,11 +9,6 @@ public enum DialogueStability
 
 public static class TextSimilarity
 {
-    public static bool IsSameDialogue(string left, string right)
-    {
-        return Classify(left, right) == DialogueStability.Unchanged;
-    }
-
     public static DialogueStability Classify(string previous, string current)
     {
         var first = TextNormalizer.Normalize(previous);

@@ -1,4 +1,5 @@
 using CortexTransl.App.Models;
+using CortexTransl.App.Views;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -10,9 +11,8 @@ internal static class GdiScreenCapture
     private const int SrcCopy = 0x00CC0020;
     private const int CaptureBlt = 0x40000000;
     private const uint PrintWindowRenderFullContent = 0x00000002;
-    private const uint GetAncestorRoot = 2;
 
-    public static Bitmap Capture(CaptureRegion region)
+    public static Bitmap Capture(CaptureRegion region, CaptureWindowTarget? source)
     {
         region = ScreenCoordinates.ClampToVirtualScreen(region);
         if (region.IsEmpty)
@@ -20,21 +20,32 @@ internal static class GdiScreenCapture
             throw new InvalidOperationException("Select the dialogue region first.");
         }
 
-        var printed = TryPrintWindow(region);
+        // Rendering Explorer's icon view excludes independent overlay windows,
+        // including our Arabic labels and the NVIDIA recording controls.
+        var printed = TryPrintWindow(region, source?.DesktopView ?? nint.Zero);
         if (printed is not null && !LooksBlank(printed))
         {
+            OverlayWindow.RestoreCapturePlacement(region);
             return printed;
         }
 
         printed?.Dispose();
-        return BitBltRegion(region);
+        printed = TryPrintWindow(region, source?.Handle ?? nint.Zero);
+        if (printed is not null && !LooksBlank(printed))
+        {
+            OverlayWindow.RestoreCapturePlacement(region);
+            return printed;
+        }
+
+        printed?.Dispose();
+        return OverlayWindow.CaptureDesktopWithUncoveredRegion(region, () => BitBltRegion(region));
     }
 
     public static bool LooksBlank(Bitmap bitmap)
     {
         var width = bitmap.Width;
         var height = bitmap.Height;
-        if (width < 2 || height < 2)
+        if (width < 3 || height < 3)
         {
             return true;
         }
@@ -107,15 +118,8 @@ internal static class GdiScreenCapture
         }
     }
 
-    private static Bitmap? TryPrintWindow(CaptureRegion region)
+    private static Bitmap? TryPrintWindow(CaptureRegion region, nint window)
     {
-        var window = WindowFromPoint(new NativePoint(region.X + (region.Width / 2), region.Y + (region.Height / 2)));
-        if (window == nint.Zero)
-        {
-            return null;
-        }
-
-        window = GetAncestor(window, GetAncestorRoot);
         if (window == nint.Zero || !GetWindowRect(window, out var bounds))
         {
             return null;
@@ -146,7 +150,7 @@ internal static class GdiScreenCapture
         var crop = Rectangle.Intersect(
             new Rectangle(0, 0, windowWidth, windowHeight),
             new Rectangle(region.X - bounds.Left, region.Y - bounds.Top, region.Width, region.Height));
-        if (crop.Width < 4 || crop.Height < 4)
+        if (crop.Width != region.Width || crop.Height != region.Height)
         {
             return null;
         }
@@ -176,23 +180,10 @@ internal static class GdiScreenCapture
         int rasterOperation);
 
     [DllImport("user32.dll")]
-    private static extern nint WindowFromPoint(NativePoint point);
-
-    [DllImport("user32.dll")]
-    private static extern nint GetAncestor(nint hwnd, uint flags);
-
-    [DllImport("user32.dll")]
     private static extern bool GetWindowRect(nint hwnd, out NativeRect rect);
 
     [DllImport("user32.dll")]
     private static extern bool PrintWindow(nint hwnd, nint hdcBlt, uint flags);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private readonly struct NativePoint(int x, int y)
-    {
-        public readonly int X = x;
-        public readonly int Y = y;
-    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRect

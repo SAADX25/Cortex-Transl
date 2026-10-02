@@ -40,7 +40,8 @@ public sealed class WindowsOcrEngine : IOcrEngine
             }
 
             var result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
-            return ToOcrResult(result, preprocessed.Scale, bitmap.Width, bitmap.Height, sourceLanguage);
+            return ToOcrResult(result, preprocessed.Scale, bitmap.Width, bitmap.Height, sourceLanguage,
+                captureKind.Equals("list", StringComparison.OrdinalIgnoreCase));
         }
         catch (OperationCanceledException)
         {
@@ -78,7 +79,8 @@ public sealed class WindowsOcrEngine : IOcrEngine
         double scale,
         int width,
         int height,
-        string sourceLanguage)
+        string sourceLanguage,
+        bool listMode)
     {
         var blocks = new List<OcrTextBlock>();
         var safeScale = scale <= 0 ? 1 : scale;
@@ -104,11 +106,15 @@ public sealed class WindowsOcrEngine : IOcrEngine
             }
         }
 
+        IReadOnlyList<OcrTextBlock> finalBlocks = listMode
+            && (sourceLanguage.Equals("en", StringComparison.OrdinalIgnoreCase) || sourceLanguage.StartsWith("en-", StringComparison.OrdinalIgnoreCase))
+                ? MenuLabelAssembler.MergeKnownWrappedLabels(blocks)
+                : blocks;
         var assembled = new OcrResult(
-            string.Join(Environment.NewLine, blocks.Select(block => block.Text)),
-            blocks);
+            string.Join(Environment.NewLine, finalBlocks.Select(block => block.Text)),
+            finalBlocks);
         var fullText = DialogueTextAssembler.Assemble(assembled, sourceLanguage);
-        return new OcrResult(fullText, blocks);
+        return new OcrResult(fullText, finalBlocks);
     }
 
     private static CaptureRegion ToBounds(

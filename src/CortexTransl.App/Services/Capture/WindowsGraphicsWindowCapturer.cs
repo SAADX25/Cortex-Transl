@@ -6,6 +6,7 @@ using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
 using Windows.Foundation.Metadata;
+using Windows.Graphics;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
@@ -13,9 +14,9 @@ using MapFlags = Vortice.Direct3D11.MapFlags;
 
 namespace CortexTransl.App.Services.Capture;
 
-internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
+internal sealed class WindowsGraphicsWindowCapturer : IDisposable
 {
-    private readonly nint _monitor;
+    private readonly nint _window;
     private readonly object _gate = new();
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
@@ -26,10 +27,12 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
     private readonly ManualResetEventSlim _frameReady = new(false);
 
     private Bitmap? _lastFrame;
+    private SizeInt32 _frameSize;
+    private Exception? _captureError;
     private bool _disposed;
 
-    private WindowsGraphicsMonitorCapturer(
-        nint monitor,
+    private WindowsGraphicsWindowCapturer(
+        nint window,
         ID3D11Device device,
         ID3D11DeviceContext context,
         IDirect3DDevice winRtDevice,
@@ -37,18 +40,19 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
         Direct3D11CaptureFramePool framePool,
         GraphicsCaptureSession session)
     {
-        _monitor = monitor;
+        _window = window;
         _device = device;
         _context = context;
         _winRtDevice = winRtDevice;
         _item = item;
+        _frameSize = item.Size;
         _framePool = framePool;
         _session = session;
         _framePool.FrameArrived += OnFrameArrived;
         _session.StartCapture();
     }
 
-    public nint Monitor => _monitor;
+    public nint Window => _window;
 
     private static void TryRequestBorderlessAccess()
     {
@@ -85,9 +89,9 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
         }
     }
 
-    public static WindowsGraphicsMonitorCapturer? TryCreate(nint monitor)
+    public static WindowsGraphicsWindowCapturer? TryCreate(nint window)
     {
-        if (monitor == nint.Zero || !GraphicsCaptureSession.IsSupported())
+        if (window == nint.Zero || !GraphicsCaptureSession.IsSupported())
         {
             return null;
         }
@@ -117,10 +121,10 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
 
             using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
             winRtDevice = GraphicsCaptureInterop.CreateWinRtDevice(dxgiDevice.NativePointer);
-            item = GraphicsCaptureInterop.CreateItemForMonitor(monitor);
+            item = GraphicsCaptureInterop.CreateItemForWindow(window);
             if (item.Size.Width < 2 || item.Size.Height < 2)
             {
-                throw new InvalidOperationException("Monitor capture size is invalid.");
+                throw new InvalidOperationException("Window capture size is invalid.");
             }
 
             TryRequestBorderlessAccess();
@@ -134,8 +138,8 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
             session.IsCursorCaptureEnabled = false;
             HideYellowCaptureBorder(session);
 
-            return new WindowsGraphicsMonitorCapturer(
-                monitor,
+            return new WindowsGraphicsWindowCapturer(
+                window,
                 device,
                 context,
                 winRtDevice,
@@ -154,14 +158,20 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
         }
     }
 
-    public Bitmap? CaptureRegion(CaptureRegion region, TimeSpan wait)
+    public Bitmap? CaptureRegion(CaptureRegion region, CaptureRegion windowBounds, TimeSpan wait)
     {
-        if (_disposed)
+        bool hasFrame;
+        lock (_gate)
         {
-            return null;
+            if (_disposed)
+            {
+                return null;
+            }
+
+            hasFrame = _lastFrame is not null || _captureError is not null;
         }
 
-        if (_lastFrame is null && !_disposed)
+        if (!hasFrame)
         {
             try
             {
@@ -175,16 +185,25 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
 
         lock (_gate)
         {
-            if (_disposed || _lastFrame is null)
+            if (_disposed)
             {
                 return null;
             }
 
-            var monitor = ScreenCoordinates.GetMonitorPhysical(_monitor);
+            if (_captureError is not null)
+            {
+                throw new InvalidOperationException("The window capture session failed. Recreating it.", _captureError);
+            }
+
+            if (_lastFrame is null)
+            {
+                return null;
+            }
+
             var crop = Rectangle.Intersect(
                 new Rectangle(0, 0, _lastFrame.Width, _lastFrame.Height),
-                new Rectangle(region.X - monitor.X, region.Y - monitor.Y, region.Width, region.Height));
-            if (crop.Width < 2 || crop.Height < 2)
+                new Rectangle(region.X - windowBounds.X, region.Y - windowBounds.Y, region.Width, region.Height));
+            if (crop.Width != region.Width || crop.Height != region.Height)
             {
                 return null;
             }
@@ -205,13 +224,19 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
 
         try
         {
-            using var frame = sender.TryGetNextFrame();
-            if (frame is null)
+            Bitmap? bitmap;
+            SizeInt32 frameSize;
+            using (var frame = sender.TryGetNextFrame())
             {
-                return;
+                if (frame is null)
+                {
+                    return;
+                }
+
+                frameSize = frame.ContentSize;
+                bitmap = CopyFrame(frame);
             }
 
-            var bitmap = CopyFrame(frame);
             if (bitmap is null)
             {
                 return;
@@ -227,6 +252,11 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
 
                 _lastFrame?.Dispose();
                 _lastFrame = bitmap;
+                if (frameSize.Width != _frameSize.Width || frameSize.Height != _frameSize.Height)
+                {
+                    sender.Recreate(_winRtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, frameSize);
+                    _frameSize = frameSize;
+                }
             }
 
             if (!_disposed)
@@ -234,8 +264,15 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
                 _frameReady.Set();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            lock (_gate)
+            {
+                if (!_disposed)
+                {
+                    _captureError = ex;
+                }
+            }
         }
     }
 
@@ -279,8 +316,12 @@ internal sealed class WindowsGraphicsMonitorCapturer : IDisposable
             _context.Map(staging, 0, MapMode.Read, MapFlags.None, out var mapped);
             try
             {
-                var width = (int)description.Width;
-                var height = (int)description.Height;
+                var width = Math.Min((int)description.Width, frame.ContentSize.Width);
+                var height = Math.Min((int)description.Height, frame.ContentSize.Height);
+                if (width < 2 || height < 2)
+                {
+                    return null;
+                }
                 var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
                 var rect = new Rectangle(0, 0, width, height);
                 var data = bitmap.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);

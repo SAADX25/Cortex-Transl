@@ -32,8 +32,6 @@ public sealed class TranslationPipeline
         _cacheRepository = cacheRepository;
     }
 
-    public bool ExcludesOverlayWindows => _screenCaptureService.ExcludesOverlayWindows;
-
     public async Task<PipelineResult> RunAsync(
         CaptureRegion region,
         string sourceLanguage,
@@ -100,6 +98,16 @@ public sealed class TranslationPipeline
         {
             throw;
         }
+        catch (CaptureUnavailableException ex)
+        {
+            return new PipelineResult(
+                _lastOriginalText ?? string.Empty,
+                _lastTranslatedText ?? string.Empty,
+                ex.Message,
+                false,
+                false,
+                _lastBlocks);
+        }
         catch (Exception ex)
         {
             AppLog.Write("pipeline", ex);
@@ -149,7 +157,7 @@ public sealed class TranslationPipeline
             originalText,
             sourceLanguage,
             targetLanguage,
-            _translationProvider.Id,
+            GetCacheProviderId(TranslationContentKind.GameDialogue),
             cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(cached))
@@ -161,7 +169,12 @@ public sealed class TranslationPipeline
         string translated;
         try
         {
-            translated = await TranslateSmartAsync(originalText, sourceLanguage, targetLanguage, cancellationToken);
+            translated = await TranslateSmartAsync(
+                originalText,
+                sourceLanguage,
+                targetLanguage,
+                TranslationContentKind.GameDialogue,
+                cancellationToken);
         }
         catch (TranslationProviderException ex)
         {
@@ -174,7 +187,7 @@ public sealed class TranslationPipeline
                 originalText,
                 sourceLanguage,
                 targetLanguage,
-                _translationProvider.Id,
+                GetCacheProviderId(TranslationContentKind.GameDialogue),
                 translated,
                 cancellationToken);
         }
@@ -187,37 +200,46 @@ public sealed class TranslationPipeline
         string originalText,
         string sourceLanguage,
         string targetLanguage,
+        TranslationContentKind contentKind,
         CancellationToken cancellationToken)
     {
         var chunks = TranslationChunker.Split(originalText);
-        if (chunks.Count <= 1)
+        if (chunks.Count <= 1 || _translationProvider.SupportsContextualLongText)
         {
             return await _translationProvider.TranslateAsync(
                 originalText,
                 sourceLanguage,
                 targetLanguage,
-                cancellationToken);
+                cancellationToken,
+                contentKind);
         }
 
         var translations = await _translationProvider.TranslateManyAsync(
             chunks,
             sourceLanguage,
             targetLanguage,
-            cancellationToken);
+            cancellationToken,
+            contentKind);
 
-        // If any chunk came back empty, retry the whole text as one block
-        var hasEmpty = translations.Any(t => string.IsNullOrWhiteSpace(t));
-        if (hasEmpty)
+        // Retry the whole text if a provider omitted or emptied any chunk.
+        var hasMissingTranslations = translations.Count != chunks.Count
+            || translations.Any(static translation => string.IsNullOrWhiteSpace(translation));
+        if (hasMissingTranslations)
         {
             var fallback = await _translationProvider.TranslateAsync(
                 originalText,
                 sourceLanguage,
                 targetLanguage,
-                cancellationToken);
+                cancellationToken,
+                contentKind);
             if (!string.IsNullOrWhiteSpace(fallback))
             {
                 return fallback;
             }
+
+            throw new TranslationProviderException(
+                "The translation service returned an incomplete result. Try again.",
+                "Incomplete translation");
         }
 
         return TranslationChunker.Join(translations);
@@ -279,7 +301,7 @@ public sealed class TranslationPipeline
                 text,
                 sourceLanguage,
                 targetLanguage,
-                _translationProvider.Id,
+                GetCacheProviderId(TranslationContentKind.UiLabel),
                 cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(cached))
@@ -294,14 +316,31 @@ public sealed class TranslationPipeline
 
         if (missing.Count > 0)
         {
-            IReadOnlyList<string> translatedMissing;
+            var translatedMissing = new string[missing.Count];
             try
             {
-                translatedMissing = await _translationProvider.TranslateManyAsync(
+                var batchTranslations = await _translationProvider.TranslateManyAsync(
                     missing,
                     sourceLanguage,
                     targetLanguage,
-                    cancellationToken);
+                    cancellationToken,
+                    TranslationContentKind.UiLabel);
+
+                for (var index = 0; index < missing.Count; index++)
+                {
+                    var translated = index < batchTranslations.Count ? batchTranslations[index] : string.Empty;
+                    if (string.IsNullOrWhiteSpace(translated))
+                    {
+                        translated = await _translationProvider.TranslateAsync(
+                            missing[index],
+                            sourceLanguage,
+                            targetLanguage,
+                            cancellationToken,
+                            TranslationContentKind.UiLabel);
+                    }
+
+                    translatedMissing[index] = translated;
+                }
             }
             catch (TranslationProviderException ex)
             {
@@ -310,7 +349,7 @@ public sealed class TranslationPipeline
 
             for (var index = 0; index < missing.Count; index++)
             {
-                var translated = index < translatedMissing.Count ? translatedMissing[index] : string.Empty;
+                var translated = translatedMissing[index];
                 translations[missing[index]] = translated;
                 if (!string.IsNullOrWhiteSpace(translated))
                 {
@@ -318,7 +357,7 @@ public sealed class TranslationPipeline
                         missing[index],
                         sourceLanguage,
                         targetLanguage,
-                        _translationProvider.Id,
+                        GetCacheProviderId(TranslationContentKind.UiLabel),
                         translated,
                         cancellationToken);
                 }
@@ -446,5 +485,17 @@ public sealed class TranslationPipeline
         _lastTranslatedText = translatedText;
         _lastBlocks = blocks;
         ClearPending();
+    }
+
+    private string GetCacheProviderId(TranslationContentKind contentKind)
+    {
+        if (contentKind == TranslationContentKind.UiLabel)
+        {
+            return $"{_translationProvider.Id}:UiLabel:ar-terms-v1";
+        }
+
+        return _translationProvider.SupportsContextualLongText
+            ? $"{_translationProvider.Id}:{contentKind}"
+            : _translationProvider.Id;
     }
 }

@@ -18,24 +18,28 @@ public sealed class RoutingTranslationProvider : ITranslationProvider
 
     public string Id => UseOffline ? _offline.Id : _online.Id;
 
+    public bool SupportsContextualLongText => Active.SupportsContextualLongText;
+
     private bool UseOffline => _settings.UseOfflineEngine;
 
     public Task<string> TranslateAsync(
         string text,
         string sourceLanguage,
         string targetLanguage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TranslationContentKind contentKind = TranslationContentKind.General)
     {
-        return Active.TranslateAsync(text, sourceLanguage, targetLanguage, cancellationToken);
+        return Active.TranslateAsync(text, sourceLanguage, targetLanguage, cancellationToken, contentKind);
     }
 
     public Task<IReadOnlyList<string>> TranslateManyAsync(
         IReadOnlyList<string> texts,
         string sourceLanguage,
         string targetLanguage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TranslationContentKind contentKind = TranslationContentKind.General)
     {
-        return Active.TranslateManyAsync(texts, sourceLanguage, targetLanguage, cancellationToken);
+        return Active.TranslateManyAsync(texts, sourceLanguage, targetLanguage, cancellationToken, contentKind);
     }
 
     private ITranslationProvider Active => UseOffline ? _offline : _online;

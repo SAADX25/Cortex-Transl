@@ -18,8 +18,6 @@ public sealed class AppSettings
 
     public bool MinimizeDuringPlay { get; set; }
 
-    public double AutoTranslateIntervalMs { get; set; } = 500;
-
     public int RegionX { get; set; }
 
     public int RegionY { get; set; }

@@ -9,8 +9,6 @@ public sealed record OverlaySettings(
     double FontScale = 1.0,
     string TextColor = "white")
 {
-    public static OverlaySettings Default { get; } = new("cover", 0.88, "dialogue");
-
     public string NormalizedPlacement => Placement.ToLowerInvariant() switch
     {
         "below" => "below",

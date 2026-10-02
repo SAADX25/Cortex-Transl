@@ -59,11 +59,6 @@ public sealed class OfflineModelInstaller
         return [$"{source}-en", $"en-{target}"];
     }
 
-    public bool AreDirectionsReady(string sourceLanguage, string targetLanguage)
-    {
-        return DirectionsFor(sourceLanguage, targetLanguage).All(IsPairReady);
-    }
-
     public async Task EnsureReadyAsync(
         string sourceLanguage,
         string targetLanguage,
