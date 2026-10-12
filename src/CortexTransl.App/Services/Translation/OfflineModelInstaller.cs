@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace CortexTransl.App.Services.Translation;
 
@@ -35,6 +36,31 @@ public sealed class OfflineModelInstaller
     public string GetConfigPath(string direction)
     {
         return Path.Combine(ResolvePairFolder(direction), "config.yml");
+    }
+
+    public string GetRuntimeConfigPath(string direction)
+    {
+        // Keep installed/bundled models intact. Runtime configuration caps native
+        // CPU threads and resolves model paths without copying large model files.
+        var source = GetConfigPath(direction);
+        var folder = Path.GetDirectoryName(source)!;
+        var lines = File.ReadAllLines(source).Select(line =>
+        {
+            var trimmed = line.Trim();
+            if (!trimmed.StartsWith("- ", StringComparison.Ordinal)) return line;
+            var name = trimmed[2..].Trim('"', '\'');
+            var file = Path.GetFullPath(Path.Combine(folder, name));
+            return File.Exists(file) ? "- '" + file.Replace("'", "''") + "'" : line;
+        });
+        var config = string.Join(Environment.NewLine, lines);
+        config = Regex.Replace(config, @"(?m)^relative-paths:.*$", "relative-paths: false");
+        config = Regex.Replace(config, @"(?m)^cpu-threads:.*$", "cpu-threads: 2");
+        var runtimeDirectory = Path.Combine(_userModelsDirectory, "runtime-configs");
+        Directory.CreateDirectory(runtimeDirectory);
+        var path = Path.Combine(runtimeDirectory, NormalizeDirection(direction) + "-story-v3.yml");
+        File.WriteAllText(path + ".tmp", config);
+        File.Move(path + ".tmp", path, overwrite: true);
+        return path;
     }
 
     public IReadOnlyList<string> DirectionsFor(string sourceLanguage, string targetLanguage)
@@ -264,7 +290,7 @@ public sealed class OfflineModelInstaller
             workspace: 128
             max-length-factor: 2.0
             skip-cost: true
-            cpu-threads: 0
+            cpu-threads: 2
             quiet: true
             quiet-translation: true
             gemm-precision: {precision}

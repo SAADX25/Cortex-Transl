@@ -12,6 +12,41 @@ public sealed class ScreenCaptureService : IScreenCaptureService
     private readonly object _gate = new();
     private WindowsGraphicsWindowCapturer? _capturer;
     private DateTime _nextGraphicsCaptureAttemptUtc;
+    private CaptureWindowTarget? _boundTarget;
+    private bool _bindingAttempted;
+    private bool _listMode;
+    private readonly string _sessionIdentity = Guid.NewGuid().ToString("N");
+    private string? _cacheIdentity;
+    public string CacheIdentity { get { lock (_gate) return _cacheIdentity ?? _sessionIdentity; } }
+
+    public void BindTarget(CaptureRegion region, bool listMode, bool onlyIfUnbound = false)
+    {
+        lock (_gate)
+        {
+            if (onlyIfUnbound && _bindingAttempted && _listMode == listMode) return;
+            _bindingAttempted = true;
+            _listMode = listMode;
+            _boundTarget = CaptureWindowTarget.Find(region, allowDesktop: listMode);
+            _cacheIdentity = _sessionIdentity;
+            try
+            {
+                if (_boundTarget is not null)
+                {
+                    using var process = System.Diagnostics.Process.GetProcessById((int)_boundTarget.ProcessId);
+                    var executable = process.MainModule?.FileName;
+                    if (!string.IsNullOrWhiteSpace(executable)) _cacheIdentity = TextHasher.Sha256(executable.ToUpperInvariant());
+                }
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or ArgumentException or InvalidOperationException)
+            {
+                // A protected process gets a session-specific scope rather than
+                // a shared executable-name scope that could collide with a game.
+            }
+            _capturer?.Dispose();
+            _capturer = null;
+            _nextGraphicsCaptureAttemptUtc = DateTime.MinValue;
+        }
+    }
 
     public Task<Bitmap> CaptureAsync(CaptureRegion region, CancellationToken cancellationToken = default)
     {
@@ -23,7 +58,10 @@ public sealed class ScreenCaptureService : IScreenCaptureService
         }
 
         Bitmap? captured = null;
-        var target = CaptureWindowTarget.Find(region);
+        CaptureWindowTarget? target;
+        lock (_gate) target = _boundTarget?.Refresh(region);
+        if (target is null)
+            throw new CaptureUnavailableException("Selected game window is unavailable or moved. Select its dialogue again with F9.");
         try
         {
             captured = TryCaptureWithGraphics(region, target);
@@ -44,6 +82,8 @@ public sealed class ScreenCaptureService : IScreenCaptureService
             ResetCapturer(TimeSpan.FromSeconds(2));
         }
 
+        if (!_listMode)
+            throw new CaptureUnavailableException("Window capture is unavailable. Use a windowed or borderless game and select it again with F9.");
         return Task.FromResult(GdiScreenCapture.Capture(region, target));
     }
 

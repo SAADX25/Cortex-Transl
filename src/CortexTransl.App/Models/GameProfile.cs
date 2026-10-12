@@ -4,6 +4,7 @@ namespace CortexTransl.App.Models;
 
 public sealed class GameProfile
 {
+    public StorySettings Story { get; set; } = new();
     public long Id { get; set; }
 
     public string Name { get; set; } = string.Empty;

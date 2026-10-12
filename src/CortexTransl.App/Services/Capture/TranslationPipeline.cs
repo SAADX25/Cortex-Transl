@@ -3,499 +3,291 @@ using CortexTransl.App.Services.Cache;
 using CortexTransl.App.Services.Ocr;
 using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
-using System.Drawing;
+using System.Text.Json;
+using System.Threading.Channels;
 
 namespace CortexTransl.App.Services.Capture;
 
-public sealed class TranslationPipeline
+public sealed class TranslationPipeline : IDisposable
 {
-    private readonly IScreenCaptureService _screenCaptureService;
-    private readonly IOcrEngine _ocrEngine;
-    private readonly ITranslationProvider _translationProvider;
-    private readonly ITranslationCacheRepository _cacheRepository;
+    private sealed record Work(long Sequence, OcrResult Ocr, string Text, string Source, string Target,
+        bool ListMode, StoryTranslationContext Context, string ProviderId, string CacheId, CancellationToken Token);
 
-    private string? _lastFingerprint;
-    private string? _lastOriginalText;
-    private string? _lastTranslatedText;
-    private string? _pendingText;
-    private IReadOnlyList<TranslatedBlock> _lastBlocks = [];
+    private readonly IScreenCaptureService _capture;
+    private readonly IOcrEngine _ocr;
+    private readonly ITranslationProvider _provider;
+    private readonly ITranslationCacheRepository _cache;
+    private readonly MenuTranslationProcessor _menus;
+    private readonly TimeProvider _clock;
+    private readonly DialogueTracker _tracker;
+    private readonly object _gate = new();
+    private readonly SemaphoreSlim _detectionLock = new(1, 1);
+    private readonly Channel<Work> _queue = Channel.CreateBounded<Work>(new BoundedChannelOptions(1)
+    { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropOldest });
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly Task _worker;
+    private CancellationTokenSource? _current;
+    private long _queuedSequence = -1, _retryAt, _lastOcrAt, _lastNonemptyAt;
+    private string? _fingerprint, _sessionKey;
+    private OcrResult? _successfulOcr;
+    private PipelineResult _result = Empty("Waiting for text.");
+    private StoryTranslationContext _context = new();
+    private readonly Queue<StoryDialogue> _history = new();
+    private string? _historyText;
+    private StoryTranslationContext? _requestContext;
+    private int _consecutiveFailures;
+    private string? _lastOcrError;
+    private long _lastOcrErrorAt;
+    private bool _disposed;
 
-    public TranslationPipeline(
-        IScreenCaptureService screenCaptureService,
-        IOcrEngine ocrEngine,
-        ITranslationProvider translationProvider,
-        ITranslationCacheRepository cacheRepository)
+    public TranslationPipeline(IScreenCaptureService screenCaptureService, IOcrEngine ocrEngine,
+        ITranslationProvider translationProvider, ITranslationCacheRepository cacheRepository, TimeProvider? timeProvider = null)
     {
-        _screenCaptureService = screenCaptureService;
-        _ocrEngine = ocrEngine;
-        _translationProvider = translationProvider;
-        _cacheRepository = cacheRepository;
+        _capture = screenCaptureService;
+        _ocr = ocrEngine;
+        _provider = translationProvider;
+        _cache = cacheRepository;
+        _menus = new(translationProvider, cacheRepository);
+        _clock = timeProvider ?? TimeProvider.System;
+        _tracker = new(_clock);
+        _worker = Task.Run(ProcessQueueAsync);
     }
 
-    public async Task<PipelineResult> RunAsync(
-        CaptureRegion region,
-        string sourceLanguage,
-        string targetLanguage,
-        bool listMode,
-        CancellationToken cancellationToken = default)
+    public StorySettings Settings { get; private set; } = new();
+    public long CurrentSequence { get { lock (_gate) return _tracker.Sequence; } }
+
+    public void BindCapture(CaptureRegion region, bool listMode, bool onlyIfUnbound = false)
     {
+        _capture.BindTarget(region, listMode, onlyIfUnbound);
+    }
+
+    public void Configure(string gameKey, StorySettings settings)
+    {
+        var snapshot = JsonSerializer.Deserialize<StorySettings>(JsonSerializer.Serialize(settings)) ?? new();
+        var context = new StoryTranslationContext
+        {
+            GameKey = gameKey, Speaker = NullIfEmpty(snapshot.Speaker), SceneState = NullIfEmpty(snapshot.SceneState),
+            Terminology = snapshot.Terminology, SpeakerNames = snapshot.SpeakerNames,
+            DeepLGlossaryId = NullIfEmpty(snapshot.DeepLGlossaryId)
+        };
+        lock (_gate)
+        {
+            if (_context.CacheScope != context.CacheScope)
+            {
+                ResetState();
+                _context = context;
+            }
+            Settings = snapshot;
+            _tracker.Settings = snapshot;
+        }
+    }
+
+    // Capture/OCR is serialized; network and offline inference run on the worker.
+    public async Task<PipelineResult> RunAsync(CaptureRegion region, string sourceLanguage, string targetLanguage,
+        bool listMode, CancellationToken cancellationToken = default)
+    {
+        await _detectionLock.WaitAsync(cancellationToken);
         try
         {
-            using var bitmap = await _screenCaptureService.CaptureAsync(region, cancellationToken);
-            var fingerprint = ImageFingerprint.Compute(bitmap);
-
-            if (fingerprint == _lastFingerprint
-                && !string.IsNullOrWhiteSpace(_lastTranslatedText)
-                && !string.IsNullOrWhiteSpace(_lastOriginalText)
-                && (!listMode || _lastBlocks.Count > 0))
+            long generation;
+            lock (_gate)
             {
-                return new PipelineResult(
-                    _lastOriginalText,
-                    _lastTranslatedText,
-                    "Same frame.",
-                    false,
-                    true,
-                    _lastBlocks);
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                var key = $"{region}:{sourceLanguage}:{targetLanguage}:{listMode}:{_provider.Id}";
+                if (_sessionKey != key) { ResetState(); _sessionKey = key; }
+                generation = _tracker.Sequence;
             }
-
-            OcrResult ocrResult;
+            OcrResult? ocr = null;
+            var failed = false;
+            string? error = null;
             try
             {
-                ocrResult = await _ocrEngine.RecognizeAsync(
-                    bitmap,
-                    sourceLanguage,
-                    cancellationToken,
-                    listMode ? "list" : "dialogue");
+                using var bitmap = await _capture.CaptureAsync(region, cancellationToken);
+                var fingerprint = ImageFingerprint.Compute(bitmap);
+                var now = _clock.GetTimestamp();
+                lock (_gate)
+                {
+                    // Recheck even identical successful frames every 400 ms.
+                    // Empty/failed OCR never becomes a reusable fingerprint.
+                    if (_fingerprint == fingerprint && _successfulOcr is not null
+                        && _clock.GetElapsedTime(_lastOcrAt, now).TotalMilliseconds < 400)
+                        ocr = _successfulOcr;
+                }
+                if (ocr is null)
+                {
+                    ocr = await _ocr.RecognizeAsync(bitmap, sourceLanguage, cancellationToken, listMode ? "list" : "dialogue");
+                    lock (_gate)
+                    {
+                        if (generation == _tracker.Sequence)
+                        {
+                            _lastOcrAt = now;
+                            _successfulOcr = string.IsNullOrWhiteSpace(ocr.Text) ? null : ocr;
+                            _fingerprint = _successfulOcr is null ? null : fingerprint;
+                        }
+                    }
+                }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) { throw; }
+            catch (CaptureUnavailableException ex)
             {
-                throw;
+                // Losing the bound window is a privacy boundary, not OCR noise.
+                lock (_gate) { ResetState(); return Empty(ex.Message) with { Sequence = _tracker.Sequence }; }
             }
             catch (Exception ex)
             {
-                AppLog.Write("ocr", ex);
-                return KeepLast(fingerprint, "Could not read the text. Select the region again with F9.");
+                var now = _clock.GetTimestamp();
+                if (_lastOcrError != ex.Message || _clock.GetElapsedTime(_lastOcrErrorAt, now).TotalSeconds >= 5)
+                { AppLog.Write("capture-ocr", ex); _lastOcrError = ex.Message; _lastOcrErrorAt = now; }
+                failed = true;
+                error = ex is InvalidOperationException ? ex.Message : "Could not read the text. Retrying OCR.";
             }
-
-            if (listMode)
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
             {
-                return await TranslateListAsync(
-                    fingerprint,
-                    ocrResult,
-                    sourceLanguage,
-                    targetLanguage,
-                    cancellationToken);
+                if (generation != _tracker.Sequence) return Empty("Capture settings changed.") with { Sequence = _tracker.Sequence };
+                var text = ocr is null ? "" : DialogueTextAssembler.Assemble(ocr, sourceLanguage);
+                if (listMode && ocr is not null)
+                    text = string.Join("\n", ocr.Blocks.Select(b => $"{b.Text}@{b.Bounds}"));
+                var now = _clock.GetTimestamp();
+                if (text.Length > 0) _lastNonemptyAt = now;
+                else if (_clock.GetElapsedTime(_lastNonemptyAt, now).TotalMilliseconds >= Math.Clamp(Settings.SceneResetMilliseconds, 1000, 60000))
+                { _history.Clear(); _historyText = null; }
+
+                var observation = _tracker.Observe(text, failed);
+                if (observation.Changed || (observation.Clear && _queuedSequence != -1))
+                {
+                    CancelCurrent();
+                    _queuedSequence = -1;
+                    _retryAt = 0;
+                    _consecutiveFailures = 0;
+                    _requestContext = null;
+                    _result = Empty(error ?? "Waiting for stable dialogue.") with { Sequence = observation.Sequence };
+                }
+                if (_current?.IsCancellationRequested == true)
+                { CancelCurrent(); _queuedSequence = -1; }
+                if (observation.Ready && _queuedSequence != observation.Sequence && now >= _retryAt && ocr is not null)
+                {
+                    CancelCurrent();
+                    _current = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+                    var context = _requestContext ??= _context with { GameKey = _context.GameKey + ":" + _capture.CacheIdentity, RecentDialogue = _history.ToArray() };
+                    var kind = listMode ? TranslationContentKind.UiLabel : TranslationContentKind.GameDialogue;
+                    var cacheId = $"{_provider.Id}:{kind}:story-v3:{context.CacheScope}";
+                    _queue.Writer.TryWrite(new(observation.Sequence, ocr, text, sourceLanguage, targetLanguage,
+                        listMode, context, _provider.Id, cacheId, _current.Token));
+                    _queuedSequence = observation.Sequence;
+                    if (!listMode && _historyText != text)
+                    {
+                        _history.Enqueue(new(text, context.Speaker));
+                        while (_history.Count > 6) _history.Dequeue();
+                        _historyText = text;
+                    }
+                    _result = Empty("Translating dialogue.") with { OriginalText = listMode ? ocr.Text : text, Sequence = observation.Sequence };
+                }
+                if (error is not null) _result = _result with { Status = error };
+                return _result with { Skipped = _result.TranslatedText.Length == 0, ClearOverlay = observation.Clear || _result.ClearOverlay };
             }
-
-            return await TranslateDialogueAsync(
-                fingerprint,
-                ocrResult,
-                sourceLanguage,
-                targetLanguage,
-                cancellationToken);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (CaptureUnavailableException ex)
-        {
-            return new PipelineResult(
-                _lastOriginalText ?? string.Empty,
-                _lastTranslatedText ?? string.Empty,
-                ex.Message,
-                false,
-                false,
-                _lastBlocks);
-        }
-        catch (Exception ex)
-        {
-            AppLog.Write("pipeline", ex);
-            return new PipelineResult(
-                string.Empty,
-                string.Empty,
-                "Capture failed. Select the region again with F9.",
-                false,
-                false);
-        }
+        finally { _detectionLock.Release(); }
     }
 
-    public void Reset()
+    private async Task ProcessQueueAsync()
     {
-        _lastFingerprint = null;
-        _lastOriginalText = null;
-        _lastTranslatedText = null;
-        _pendingText = null;
-        _lastBlocks = [];
-    }
-
-    private async Task<PipelineResult> TranslateDialogueAsync(
-        string fingerprint,
-        OcrResult ocrResult,
-        string sourceLanguage,
-        string targetLanguage,
-        CancellationToken cancellationToken)
-    {
-        var originalText = DialogueTextAssembler.Assemble(ocrResult, sourceLanguage);
-        if (string.IsNullOrWhiteSpace(originalText))
-        {
-            return KeepLast(fingerprint, "Waiting for text.");
-        }
-
-        if (ShouldHoldLastTranslation(originalText))
-        {
-            _lastFingerprint = fingerprint;
-            return new PipelineResult(
-                _lastOriginalText ?? originalText,
-                _lastTranslatedText ?? string.Empty,
-                "Same dialogue.",
-                false,
-                true);
-        }
-
-        var cached = await _cacheRepository.GetAsync(
-            originalText,
-            sourceLanguage,
-            targetLanguage,
-            GetCacheProviderId(TranslationContentKind.GameDialogue),
-            cancellationToken);
-
-        if (!string.IsNullOrWhiteSpace(cached))
-        {
-            Remember(fingerprint, originalText, cached, []);
-            return new PipelineResult(originalText, cached, "Loaded from cache.", true, false);
-        }
-
-        string translated;
         try
         {
-            translated = await TranslateSmartAsync(
-                originalText,
-                sourceLanguage,
-                targetLanguage,
-                TranslationContentKind.GameDialogue,
-                cancellationToken);
-        }
-        catch (TranslationProviderException ex)
-        {
-            return new PipelineResult(originalText, string.Empty, ex.Message, false, false);
-        }
-
-        if (!string.IsNullOrWhiteSpace(translated))
-        {
-            await _cacheRepository.SaveAsync(
-                originalText,
-                sourceLanguage,
-                targetLanguage,
-                GetCacheProviderId(TranslationContentKind.GameDialogue),
-                translated,
-                cancellationToken);
-        }
-
-        Remember(fingerprint, originalText, translated, []);
-        return new PipelineResult(originalText, translated, "Translated.", false, false);
-    }
-
-    private async Task<string> TranslateSmartAsync(
-        string originalText,
-        string sourceLanguage,
-        string targetLanguage,
-        TranslationContentKind contentKind,
-        CancellationToken cancellationToken)
-    {
-        var chunks = TranslationChunker.Split(originalText);
-        if (chunks.Count <= 1 || _translationProvider.SupportsContextualLongText)
-        {
-            return await _translationProvider.TranslateAsync(
-                originalText,
-                sourceLanguage,
-                targetLanguage,
-                cancellationToken,
-                contentKind);
-        }
-
-        var translations = await _translationProvider.TranslateManyAsync(
-            chunks,
-            sourceLanguage,
-            targetLanguage,
-            cancellationToken,
-            contentKind);
-
-        // Retry the whole text if a provider omitted or emptied any chunk.
-        var hasMissingTranslations = translations.Count != chunks.Count
-            || translations.Any(static translation => string.IsNullOrWhiteSpace(translation));
-        if (hasMissingTranslations)
-        {
-            var fallback = await _translationProvider.TranslateAsync(
-                originalText,
-                sourceLanguage,
-                targetLanguage,
-                cancellationToken,
-                contentKind);
-            if (!string.IsNullOrWhiteSpace(fallback))
+            await foreach (var work in _queue.Reader.ReadAllAsync(_lifetime.Token))
             {
-                return fallback;
-            }
-
-            throw new TranslationProviderException(
-                "The translation service returned an incomplete result. Try again.",
-                "Incomplete translation");
-        }
-
-        return TranslationChunker.Join(translations);
-    }
-
-    private async Task<PipelineResult> TranslateListAsync(
-        string fingerprint,
-        OcrResult ocrResult,
-        string sourceLanguage,
-        string targetLanguage,
-        CancellationToken cancellationToken)
-    {
-        if (ocrResult.Blocks.Count == 0)
-        {
-            return KeepLast(
-                fingerprint,
-                _lastBlocks.Count > 0
-                    ? "Waiting for labels."
-                    : "No labels found. Select the list or icon names.");
-        }
-
-        var originalText = string.Join(
-            Environment.NewLine,
-            ocrResult.Blocks.Select(block => block.Text).Where(static text => !string.IsNullOrWhiteSpace(text)));
-        if (string.IsNullOrWhiteSpace(originalText))
-        {
-            originalText = DialogueTextAssembler.Assemble(ocrResult, sourceLanguage);
-        }
-
-        if (_lastBlocks.Count == ocrResult.Blocks.Count && ShouldHoldLastTranslation(originalText))
-        {
-            _lastFingerprint = fingerprint;
-            return new PipelineResult(
-                _lastOriginalText ?? originalText,
-                _lastTranslatedText ?? string.Empty,
-                "Same list.",
-                false,
-                true,
-                _lastBlocks);
-        }
-
-        var uniqueTexts = ocrResult.Blocks
-            .Select(block => block.Text)
-            .Where(static text => !string.IsNullOrWhiteSpace(text))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        var translations = new Dictionary<string, string>(StringComparer.Ordinal);
-        var missing = new List<string>();
-
-        foreach (var text in uniqueTexts)
-        {
-            if (LooksMostlyArabic(text))
-            {
-                continue;
-            }
-
-            var cached = await _cacheRepository.GetAsync(
-                text,
-                sourceLanguage,
-                targetLanguage,
-                GetCacheProviderId(TranslationContentKind.UiLabel),
-                cancellationToken);
-
-            if (!string.IsNullOrWhiteSpace(cached))
-            {
-                translations[text] = cached;
-            }
-            else
-            {
-                missing.Add(text);
-            }
-        }
-
-        if (missing.Count > 0)
-        {
-            var translatedMissing = new string[missing.Count];
-            try
-            {
-                var batchTranslations = await _translationProvider.TranslateManyAsync(
-                    missing,
-                    sourceLanguage,
-                    targetLanguage,
-                    cancellationToken,
-                    TranslationContentKind.UiLabel);
-
-                for (var index = 0; index < missing.Count; index++)
+                try
                 {
-                    var translated = index < batchTranslations.Count ? batchTranslations[index] : string.Empty;
-                    if (string.IsNullOrWhiteSpace(translated))
+                    work.Token.ThrowIfCancellationRequested();
+                    if (_provider.Id != work.ProviderId) continue;
+                    PipelineResult result;
+                    if (work.ListMode)
+                        result = await _menus.TranslateAsync(work.CacheId, work.Ocr, work.Source, work.Target, work.Context, work.Token);
+                    else
                     {
-                        translated = await _translationProvider.TranslateAsync(
-                            missing[index],
-                            sourceLanguage,
-                            targetLanguage,
-                            cancellationToken,
-                            TranslationContentKind.UiLabel);
+                        var cached = await _cache.GetAsync(work.Text, work.Source, work.Target, work.CacheId, work.Token);
+                        var translated = cached ?? await _provider.TranslateStoryAsync(work.Text, work.Source, work.Target, work.Context, work.Token);
+                        if (string.IsNullOrWhiteSpace(translated))
+                            throw new TranslationProviderException("Translation returned empty text. Retrying.", "empty translation");
+                        work.Token.ThrowIfCancellationRequested();
+                        if (cached is null) await _cache.SaveAsync(work.Text, work.Source, work.Target, work.CacheId, translated, work.Token);
+                        result = new(work.Text, translated, cached is null ? "Translated." : "Loaded from cache.", cached is not null, false);
                     }
-
-                    translatedMissing[index] = translated;
+                    lock (_gate)
+                    {
+                        if (_disposed || work.Token.IsCancellationRequested || work.Sequence != _tracker.Sequence || _provider.Id != work.ProviderId) continue;
+                        _result = result with { Sequence = work.Sequence, ClearOverlay = result.TranslatedText.Length == 0 };
+                        if (result.TranslatedText.Length == 0) { ScheduleRetry(); continue; }
+                        _consecutiveFailures = 0;
+                    }
                 }
-            }
-            catch (TranslationProviderException ex)
-            {
-                return new PipelineResult(originalText, string.Empty, ex.Message, false, false);
-            }
-
-            for (var index = 0; index < missing.Count; index++)
-            {
-                var translated = translatedMissing[index];
-                translations[missing[index]] = translated;
-                if (!string.IsNullOrWhiteSpace(translated))
+                catch (OperationCanceledException) when (work.Token.IsCancellationRequested || _lifetime.IsCancellationRequested) { }
+                catch (Exception ex)
                 {
-                    await _cacheRepository.SaveAsync(
-                        missing[index],
-                        sourceLanguage,
-                        targetLanguage,
-                        GetCacheProviderId(TranslationContentKind.UiLabel),
-                        translated,
-                        cancellationToken);
+                    AppLog.Write("translation-worker", ex);
+                    lock (_gate)
+                    {
+                        if (work.Sequence != _tracker.Sequence || work.Token.IsCancellationRequested) continue;
+                        _result = Empty(ex is TranslationProviderException ? ex.Message : "Translation failed. Retrying.") with { Sequence = work.Sequence };
+                        ScheduleRetry();
+                    }
                 }
             }
         }
-
-        var blocks = ocrResult.Blocks
-            .Select(block => new TranslatedBlock(
-                block.Text,
-                translations.TryGetValue(block.Text, out var translated) ? translated : string.Empty,
-                block.Bounds))
-            .Where(block => !string.IsNullOrWhiteSpace(block.TranslatedText))
-            .ToArray();
-
-        if (blocks.Length == 0)
-        {
-            return new PipelineResult(
-                originalText,
-                string.Empty,
-                "Labels were found, but translation returned empty text.",
-                false,
-                false);
-        }
-
-        var translatedText = string.Join(Environment.NewLine, blocks.Select(block => block.TranslatedText));
-        Remember(fingerprint, originalText, translatedText, blocks);
-        var usedCache = missing.Count == 0;
-        return new PipelineResult(
-            originalText,
-            translatedText,
-            usedCache ? $"Loaded {blocks.Length} labels from cache." : $"Translated {blocks.Length} labels.",
-            usedCache,
-            false,
-            blocks);
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
     }
 
-    private static bool LooksMostlyArabic(string text)
+    private void ScheduleRetry()
     {
-        var arabic = 0;
-        var letters = 0;
-        foreach (var character in text)
-        {
-            if (!char.IsLetter(character))
-            {
-                continue;
-            }
-
-            letters++;
-            if (character is >= '\u0600' and <= '\u06FF')
-            {
-                arabic++;
-            }
-        }
-
-        return letters > 0 && arabic * 2 >= letters;
+        _queuedSequence = -1;
+        _consecutiveFailures++;
+        var delaySeconds = 1 << Math.Min(_consecutiveFailures - 1, 3);
+        _retryAt = _clock.GetTimestamp() + _clock.TimestampFrequency * delaySeconds;
     }
 
-    private bool ShouldHoldLastTranslation(string originalText)
+    public void Reset() { lock (_gate) ResetState(); }
+    public void BeginScene(string sceneState)
     {
-        if (string.IsNullOrWhiteSpace(_lastTranslatedText) && string.IsNullOrWhiteSpace(_lastOriginalText))
-        {
-            ClearPending();
-            return false;
-        }
-
-        if (DialogueTextAssembler.LooksLikeOcrGlitch(_lastOriginalText ?? string.Empty, originalText))
-        {
-            return true;
-        }
-
-        var decision = TextSimilarity.Classify(_lastOriginalText ?? string.Empty, originalText);
-        if (decision == DialogueStability.Unchanged)
-        {
-            ClearPending();
-            return true;
-        }
-
-        if (decision == DialogueStability.Changed || TextSimilarity.LooksComplete(originalText))
-        {
-            ClearPending();
-            return false;
-        }
-
-        if (_pendingText is not null
-            && TextSimilarity.Classify(_pendingText, originalText) == DialogueStability.Unchanged)
-        {
-            ClearPending();
-            return false;
-        }
-
-        _pendingText = originalText;
-        return true;
+        lock (_gate) { ResetState(); _context = _context with { SceneState = sceneState }; }
     }
 
-    private PipelineResult KeepLast(string fingerprint, string status)
+    private void ResetState()
     {
-        _lastFingerprint = fingerprint;
-        if (string.IsNullOrWhiteSpace(_lastTranslatedText) && _lastBlocks.Count == 0)
+        CancelCurrent();
+        _tracker.Reset();
+        _queuedSequence = -1;
+        _retryAt = 0;
+        _fingerprint = null;
+        _successfulOcr = null;
+        _history.Clear();
+        _historyText = null;
+        _requestContext = null;
+        _consecutiveFailures = 0;
+        _result = Empty("Waiting for text.") with { Sequence = _tracker.Sequence };
+    }
+
+    private void CancelCurrent()
+    {
+        _current?.Cancel();
+        _current?.Dispose();
+        _current = null;
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static PipelineResult Empty(string status) => new("", "", status, false, true) { ClearOverlay = true };
+
+    public void Dispose()
+    {
+        lock (_gate)
         {
-            return new PipelineResult(string.Empty, string.Empty, status, false, false);
+            if (_disposed) return;
+            _disposed = true;
+            ResetState();
+            _queue.Writer.TryComplete();
+            _lifetime.Cancel();
         }
-
-        return new PipelineResult(
-            _lastOriginalText ?? string.Empty,
-            _lastTranslatedText ?? string.Empty,
-            status,
-            false,
-            true,
-            _lastBlocks);
-    }
-
-    private void ClearPending()
-    {
-        _pendingText = null;
-    }
-
-    private void Remember(
-        string fingerprint,
-        string originalText,
-        string translatedText,
-        IReadOnlyList<TranslatedBlock> blocks)
-    {
-        _lastFingerprint = fingerprint;
-        _lastOriginalText = originalText;
-        _lastTranslatedText = translatedText;
-        _lastBlocks = blocks;
-        ClearPending();
-    }
-
-    private string GetCacheProviderId(TranslationContentKind contentKind)
-    {
-        if (contentKind == TranslationContentKind.UiLabel)
-        {
-            return $"{_translationProvider.Id}:UiLabel:ar-terms-v1";
-        }
-
-        return _translationProvider.SupportsContextualLongText
-            ? $"{_translationProvider.Id}:{contentKind}"
-            : _translationProvider.Id;
+        // Do not block WPF shutdown on an uninterruptible native inference call.
+        _ = _worker.ContinueWith(_ => _lifetime.Dispose(), CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 }

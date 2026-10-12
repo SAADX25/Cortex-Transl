@@ -29,14 +29,6 @@ public static class TextSimilarity
             return DialogueStability.Unchanged;
         }
 
-        var maxLength = Math.Max(first.Length, second.Length);
-        var distance = Levenshtein(first, second);
-        var noise = Math.Max(1, (int)Math.Ceiling(maxLength * 0.02));
-        if (distance <= noise)
-        {
-            return DialogueStability.Unchanged;
-        }
-
         if (IsProgressiveChange(first, second))
         {
             return DialogueStability.Confirm;
@@ -71,33 +63,7 @@ public static class TextSimilarity
             return true;
         }
 
-        return shorter.Length >= 8 && longer.Contains(shorter, StringComparison.Ordinal);
+        return false;
     }
 
-    private static int Levenshtein(string left, string right)
-    {
-        var previous = new int[right.Length + 1];
-        var current = new int[right.Length + 1];
-
-        for (var j = 0; j <= right.Length; j++)
-        {
-            previous[j] = j;
-        }
-
-        for (var i = 1; i <= left.Length; i++)
-        {
-            current[0] = i;
-            for (var j = 1; j <= right.Length; j++)
-            {
-                var cost = left[i - 1] == right[j - 1] ? 0 : 1;
-                current[j] = Math.Min(
-                    Math.Min(current[j - 1] + 1, previous[j] + 1),
-                    previous[j - 1] + cost);
-            }
-
-            (previous, current) = (current, previous);
-        }
-
-        return previous[right.Length];
-    }
 }

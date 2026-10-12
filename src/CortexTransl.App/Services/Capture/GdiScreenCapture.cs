@@ -8,8 +8,6 @@ namespace CortexTransl.App.Services.Capture;
 
 internal static class GdiScreenCapture
 {
-    private const int SrcCopy = 0x00CC0020;
-    private const int CaptureBlt = 0x40000000;
     private const uint PrintWindowRenderFullContent = 0x00000002;
 
     public static Bitmap Capture(CaptureRegion region, CaptureWindowTarget? source)
@@ -38,7 +36,9 @@ internal static class GdiScreenCapture
         }
 
         printed?.Dispose();
-        return OverlayWindow.CaptureDesktopWithUncoveredRegion(region, () => BitBltRegion(region));
+        // Even explicit desktop-icon mode must capture its selected shell window
+        // directly. Screen pixels could contain a newly opened private window.
+        throw new CaptureUnavailableException("Direct selected-window capture failed. Select the window again with F9.");
     }
 
     public static bool LooksBlank(Bitmap bitmap)
@@ -63,59 +63,6 @@ internal static class GdiScreenCapture
         }
 
         return lit < 3;
-    }
-
-    private static Bitmap BitBltRegion(CaptureRegion region)
-    {
-        var bitmap = new Bitmap(region.Width, region.Height, PixelFormat.Format32bppArgb);
-        try
-        {
-            using var graphics = Graphics.FromImage(bitmap);
-            var destination = graphics.GetHdc();
-            var source = GetDC(nint.Zero);
-            var copied = false;
-
-            try
-            {
-                copied = BitBlt(
-                    destination,
-                    0,
-                    0,
-                    region.Width,
-                    region.Height,
-                    source,
-                    region.X,
-                    region.Y,
-                    SrcCopy | CaptureBlt);
-            }
-            finally
-            {
-                if (source != nint.Zero)
-                {
-                    ReleaseDC(nint.Zero, source);
-                }
-
-                graphics.ReleaseHdc(destination);
-            }
-
-            if (!copied)
-            {
-                graphics.CopyFromScreen(
-                    region.X,
-                    region.Y,
-                    0,
-                    0,
-                    new Size(region.Width, region.Height),
-                    CopyPixelOperation.SourceCopy);
-            }
-
-            return bitmap;
-        }
-        catch
-        {
-            bitmap.Dispose();
-            throw;
-        }
     }
 
     private static Bitmap? TryPrintWindow(CaptureRegion region, nint window)
@@ -160,24 +107,6 @@ internal static class GdiScreenCapture
         target.DrawImage(full, new Rectangle(0, 0, crop.Width, crop.Height), crop, GraphicsUnit.Pixel);
         return result;
     }
-
-    [DllImport("user32.dll")]
-    private static extern nint GetDC(nint hwnd);
-
-    [DllImport("user32.dll")]
-    private static extern int ReleaseDC(nint hwnd, nint hdc);
-
-    [DllImport("gdi32.dll")]
-    private static extern bool BitBlt(
-        nint destination,
-        int destinationX,
-        int destinationY,
-        int width,
-        int height,
-        nint source,
-        int sourceX,
-        int sourceY,
-        int rasterOperation);
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(nint hwnd, out NativeRect rect);

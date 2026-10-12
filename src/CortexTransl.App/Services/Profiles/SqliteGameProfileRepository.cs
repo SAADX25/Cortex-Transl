@@ -1,5 +1,6 @@
 using CortexTransl.App.Data;
 using CortexTransl.App.Models;
+using System.Text.Json;
 
 namespace CortexTransl.App.Services.Profiles;
 
@@ -24,7 +25,7 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
             SELECT Id, Name, RegionX, RegionY, RegionWidth, RegionHeight,
                    SourceLanguage, TargetLanguage, OcrEngine, TranslationProvider,
                    TranslationMode, OverlayPlacement, OverlayBackgroundOpacity,
-                   OverlayTextSize, OverlayTextColor
+                   OverlayTextSize, OverlayTextColor, StorySettingsJson
             FROM GameProfiles
             ORDER BY UpdatedUtc DESC, Name COLLATE NOCASE;
             """;
@@ -45,7 +46,8 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
                 OverlayPlacement = reader.IsDBNull(11) ? "cover" : reader.GetString(11),
                 OverlayBackgroundOpacity = reader.IsDBNull(12) ? 0.88 : reader.GetDouble(12),
                 OverlayTextSize = reader.IsDBNull(13) ? "medium" : reader.GetString(13),
-                OverlayTextColor = reader.IsDBNull(14) ? "white" : reader.GetString(14)
+                OverlayTextColor = reader.IsDBNull(14) ? "white" : reader.GetString(14),
+                Story = ReadStorySettings(reader.IsDBNull(15) ? "{}" : reader.GetString(15))
             });
         }
 
@@ -64,11 +66,11 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
             INSERT INTO GameProfiles
                 (Name, RegionX, RegionY, RegionWidth, RegionHeight, SourceLanguage, TargetLanguage,
                  OcrEngine, TranslationProvider, TranslationMode, OverlayPlacement,
-                 OverlayBackgroundOpacity, OverlayTextSize, OverlayTextColor, CreatedUtc, UpdatedUtc)
+                 OverlayBackgroundOpacity, OverlayTextSize, OverlayTextColor, StorySettingsJson, CreatedUtc, UpdatedUtc)
             VALUES
                 ($name, $x, $y, $width, $height, $sourceLanguage, $targetLanguage,
                  $ocrEngine, $translationProvider, $translationMode, $overlayPlacement,
-                 $overlayOpacity, $overlayTextSize, $overlayTextColor, $now, $now)
+                 $overlayOpacity, $overlayTextSize, $overlayTextColor, $story, $now, $now)
             ON CONFLICT(Name)
             DO UPDATE SET
                 RegionX = excluded.RegionX,
@@ -84,9 +86,11 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
                 OverlayBackgroundOpacity = excluded.OverlayBackgroundOpacity,
                 OverlayTextSize = excluded.OverlayTextSize,
                 OverlayTextColor = excluded.OverlayTextColor,
+                StorySettingsJson = excluded.StorySettingsJson,
                 UpdatedUtc = excluded.UpdatedUtc;
             """;
         command.Parameters.AddWithValue("$name", profile.Name);
+        command.Parameters.AddWithValue("$story", JsonSerializer.Serialize(profile.Story));
         command.Parameters.AddWithValue("$x", profile.Region.X);
         command.Parameters.AddWithValue("$y", profile.Region.Y);
         command.Parameters.AddWithValue("$width", profile.Region.Width);
@@ -103,6 +107,12 @@ public sealed class SqliteGameProfileRepository : IGameProfileRepository
         command.Parameters.AddWithValue("$now", now);
 
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static StorySettings ReadStorySettings(string json)
+    {
+        try { return JsonSerializer.Deserialize<StorySettings>(json) ?? new(); }
+        catch (JsonException) { return new(); }
     }
 
     public async Task DeleteAsync(long id, CancellationToken cancellationToken = default)

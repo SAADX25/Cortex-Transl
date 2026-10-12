@@ -26,9 +26,24 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
     }
 
-    public string Id => "deepl-ar-context-v2";
+    public string Id => "deepl-ar-story-v3";
 
     public bool SupportsContextualLongText => true;
+
+    public async Task<string> TranslateStoryAsync(string text, string sourceLanguage, string targetLanguage,
+        StoryTranslationContext context, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (context.TryExactArabicTerm(text, sourceLanguage, targetLanguage, out var term)) return term;
+        var apiKey = _settings.DeepLApiKey.Trim();
+        if (apiKey.Length == 0) throw new TranslationProviderException("Paste a DeepL API key before translating.", "DeepL missing API key");
+        var protectedText = ProtectedStoryText.Create(text, sourceLanguage, targetLanguage, context);
+        var result = await TranslateBatchAsync([protectedText?.Xml ?? text], sourceLanguage, targetLanguage, apiKey,
+            TranslationContentKind.GameDialogue, cancellationToken, context, protectedText is not null);
+        if (result.Length != 1 || string.IsNullOrWhiteSpace(result[0]))
+            throw new TranslationProviderException("DeepL returned an incomplete translation.", "DeepL invalid response");
+        return protectedText?.ReadTranslation(result[0]) ?? result[0];
+    }
 
     public async Task<string> TranslateAsync(
         string text,
@@ -116,21 +131,33 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         string targetLanguage,
         string apiKey,
         TranslationContentKind contentKind,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        StoryTranslationContext? storyContext = null,
+        bool protectTerminology = false)
     {
         var payload = new DeepLTranslateRequest
         {
             Text = texts,
             TargetLanguage = MapLanguage(targetLanguage, isTarget: true),
-            SplitSentences = "0",
+            SplitSentences = contentKind == TranslationContentKind.GameDialogue ? "nonewlines" : "0",
             PreserveFormatting = true,
             Context = contentKind switch
             {
-                TranslationContentKind.GameDialogue => GameDialogueContext,
+                TranslationContentKind.GameDialogue => GameDialogueContext +
+                    " Preserve negation, emotion, gender when known, and relationships. Never invent identities or plot details.\n" +
+                    (storyContext?.ToDeepLContext() ?? string.Empty),
                 TranslationContentKind.UiLabel => GameMenuContext,
                 _ => GeneralArabicContext
-            }
+            },
+            GlossaryId = string.IsNullOrWhiteSpace(storyContext?.DeepLGlossaryId) ? null : storyContext.DeepLGlossaryId,
+            TagHandling = protectTerminology ? "xml" : null,
+            IgnoreTags = protectTerminology ? ["cortex-term"] : null,
+            NonSplittingTags = protectTerminology ? ["cortex-term", "cortex-dialogue"] : null,
+            OutlineDetection = protectTerminology ? false : null
         };
+
+        if (payload.GlossaryId is not null && sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
+            throw new TranslationProviderException("Select a source language to use a DeepL glossary.", "DeepL glossary requires source language");
 
         if (!sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
         {
@@ -224,7 +251,7 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
             .Select(item => item.Text?.Trim() ?? string.Empty)
             .ToArray();
 
-        if (translations is null || translations.Length == 0)
+        if (translations is null || translations.Length == 0 || translations.Any(string.IsNullOrWhiteSpace))
         {
             throw new TranslationProviderException(
                 "DeepL returned an empty translation.",
@@ -271,6 +298,26 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
 
         [JsonPropertyName("context")]
         public string? Context { get; init; }
+
+        [JsonPropertyName("glossary_id")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? GlossaryId { get; init; }
+
+        [JsonPropertyName("tag_handling")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TagHandling { get; init; }
+
+        [JsonPropertyName("ignore_tags")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[]? IgnoreTags { get; init; }
+
+        [JsonPropertyName("non_splitting_tags")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[]? NonSplittingTags { get; init; }
+
+        [JsonPropertyName("outline_detection")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? OutlineDetection { get; init; }
     }
 
     private sealed class DeepLTranslateResponse

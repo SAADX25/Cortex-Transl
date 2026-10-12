@@ -8,6 +8,8 @@ public sealed record PipelineResult(
     bool Skipped,
     IReadOnlyList<TranslatedBlock> Blocks)
 {
+    public long Sequence { get; init; }
+    public bool ClearOverlay { get; init; }
     public PipelineResult(
         string originalText,
         string translatedText,

@@ -54,6 +54,7 @@ public sealed class DatabaseMigrator
         await EnsureColumnAsync(connection, "GameProfiles", "OverlayBackgroundOpacity", "REAL NOT NULL DEFAULT 0.88", cancellationToken);
         await EnsureColumnAsync(connection, "GameProfiles", "OverlayTextSize", "TEXT NOT NULL DEFAULT 'medium'", cancellationToken);
         await EnsureColumnAsync(connection, "GameProfiles", "OverlayTextColor", "TEXT NOT NULL DEFAULT 'white'", cancellationToken);
+        await EnsureColumnAsync(connection, "GameProfiles", "StorySettingsJson", "TEXT NOT NULL DEFAULT '{}'", cancellationToken);
     }
 
     private static async Task EnsureColumnAsync(

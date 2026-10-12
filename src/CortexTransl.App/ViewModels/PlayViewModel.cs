@@ -8,6 +8,7 @@ using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
 using System.Diagnostics;
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -57,6 +58,52 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private string _testTranslatedText = string.Empty;
     private string _testStatusMessage = "Type or paste English text, then press Test to check translation quality.";
     private bool _isTestRunning;
+    private StorySettings _storySettings = new();
+
+    public string SpeakerIdentity { get => _storySettings.Speaker; set { _storySettings.Speaker = value; UpdateStorySettings(); } }
+    public string SceneState { get => _storySettings.SceneState; set { _storySettings.SceneState = value; UpdateStorySettings(); } }
+    public string DeepLGlossaryId { get => _storySettings.DeepLGlossaryId; set { _storySettings.DeepLGlossaryId = value; UpdateStorySettings(); } }
+    public int SubtitleGraceMilliseconds { get => _storySettings.DisappearanceGraceMilliseconds; set { _storySettings.DisappearanceGraceMilliseconds = Math.Clamp(value, 0, 5000); UpdateStorySettings(); } }
+    public int SubtitleMaximumMilliseconds { get => _storySettings.MaximumVisibilityMilliseconds; set { _storySettings.MaximumVisibilityMilliseconds = Math.Clamp(value, 500, 60000); UpdateStorySettings(); } }
+    public int TextStabilityMilliseconds { get => _storySettings.StabilityMilliseconds; set { _storySettings.StabilityMilliseconds = Math.Clamp(value, 100, 2000); UpdateStorySettings(); } }
+    public string TerminologyText
+    {
+        get => string.Join(Environment.NewLine, _storySettings.Terminology.Select(x => $"{x.Key} = {x.Value}"));
+        set { if (TryParseTerms(value, out var terms)) { _storySettings.Terminology = terms; UpdateStorySettings(); } }
+    }
+    public string SpeakerNamesText
+    {
+        get => string.Join(Environment.NewLine, _storySettings.SpeakerNames.Select(x => $"{x.Key} = {x.Value}"));
+        set { if (TryParseTerms(value, out var terms)) { _storySettings.SpeakerNames = terms; UpdateStorySettings(); } }
+    }
+
+    private bool TryParseTerms(string text, out Dictionary<string, string> terms)
+    {
+        terms = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || parts.Any(string.IsNullOrWhiteSpace) || terms.Count >= 100)
+            { StatusMessage = "Use one English = Arabic entry per line (up to 100 entries)."; return false; }
+            terms[parts[0]] = parts[1];
+        }
+        return true;
+    }
+
+    private void UpdateStorySettings()
+    {
+        _pipeline.Configure(string.IsNullOrWhiteSpace(ProfileName) ? "session" : ProfileName.Trim(), _storySettings);
+        _ = SaveSettingsAsync();
+    }
+
+    private void LoadStorySettings(StorySettings? settings)
+    {
+        _storySettings = JsonSerializer.Deserialize<StorySettings>(JsonSerializer.Serialize(settings ?? new())) ?? new();
+        foreach (var property in new[] { nameof(SpeakerIdentity), nameof(SceneState), nameof(DeepLGlossaryId), nameof(TerminologyText),
+            nameof(SpeakerNamesText), nameof(SubtitleGraceMilliseconds), nameof(SubtitleMaximumMilliseconds), nameof(TextStabilityMilliseconds) })
+            OnPropertyChanged(property);
+        _pipeline.Configure(string.IsNullOrWhiteSpace(ProfileName) ? "session" : ProfileName.Trim(), _storySettings);
+    }
 
     public PlayViewModel(
         DatabaseMigrator databaseMigrator,
@@ -250,6 +297,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _deepLApiKey, value))
             {
                 _translationProviderSettings.DeepLApiKey = value;
+                _pipeline.Reset();
                 OnPropertyChanged(nameof(ApiKeyStatusText));
                 OnPropertyChanged(nameof(HasApiKey));
                 OnPropertyChanged(nameof(CanTranslate));
@@ -268,6 +316,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _useDeepLFreeApi, value))
             {
                 _translationProviderSettings.UseDeepLFreeApi = value;
+                _pipeline.Reset();
                 _ = SaveSettingsAsync();
             }
         }
@@ -659,6 +708,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             _sourceLanguage = "en";
         }
         _profileName = settings.ProfileName;
+        LoadStorySettings(settings.Story);
         _deepLApiKey = _appSettingsService.DecryptApiKey(settings.EncryptedDeepLApiKey);
         _translationProviderSettings.DeepLApiKey = _deepLApiKey;
         _translationProviderSettings.UseDeepLFreeApi = _useDeepLFreeApi;
@@ -784,6 +834,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                 return;
             }
             _pipeline.Reset();
+            _pipeline.BindCapture(SelectedRegion, IsListMode);
             if (IsPlaying)
             {
                 PinOverlay();
@@ -831,6 +882,9 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
 
         IsPlaying = true;
+        _pipeline.Reset();
+        _pipeline.BindCapture(SelectedRegion, IsListMode, onlyIfUnbound: true);
+        _pipeline.Configure(string.IsNullOrWhiteSpace(ProfileName) ? "session" : ProfileName.Trim(), _storySettings);
         _playCts?.Dispose();
         _playCts = new CancellationTokenSource();
         StatusMessage = "Translation on. F8 stops it. F10 opens the program.";
@@ -855,6 +909,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
 
         IsPlaying = false;
+        _pipeline.Reset();
         try
         {
             _overlayService.Hide();
@@ -896,7 +951,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                     });
                 }
 
-                var delay = skipped ? 360 : 120;
+                var delay = Math.Clamp(_storySettings.CaptureIntervalMilliseconds, 50, 500);
                 await Task.Delay(delay, token);
             }
         }
@@ -965,9 +1020,17 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
             RunOnUi(() =>
             {
-                if (_disposed)
+                if (_disposed || cancellationToken.IsCancellationRequested || result.Sequence != _pipeline.CurrentSequence)
                 {
                     return;
+                }
+
+                if (result.ClearOverlay)
+                {
+                    OriginalText = string.Empty;
+                    TranslatedText = string.Empty;
+                    _lastBlocks = [];
+                    _overlayService.Hide();
                 }
 
                 if (!string.IsNullOrWhiteSpace(original))
@@ -1003,10 +1066,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                     }
                 }
 
-                if (!skipped)
-                {
-                    StatusMessage = status;
-                }
+                StatusMessage = status;
             });
 
             return skipped || string.IsNullOrWhiteSpace(translated);
@@ -1169,7 +1229,8 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             OverlayTextSize = OverlayTextSize,
             OverlayTextColor = OverlayTextColor,
             OcrEngine = "windows",
-            TranslationProvider = IsOfflineEngine ? "offline" : "deepl"
+            TranslationProvider = IsOfflineEngine ? "offline" : "deepl",
+            Story = JsonSerializer.Deserialize<StorySettings>(JsonSerializer.Serialize(_storySettings)) ?? new()
         };
     }
 
@@ -1191,7 +1252,9 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         _overlayTextSize = NormalizeOverlayTextSize(profile.OverlayTextSize);
         _overlayTextColor = OverlayTextColors.Normalize(profile.OverlayTextColor);
         _profileName = profile.Name;
+        LoadStorySettings(profile.Story);
         _pipeline.Reset();
+        _pipeline.BindCapture(SelectedRegion, IsListMode);
         _lastBlocks = [];
 
         OnPropertyChanged(nameof(SelectedRegion));
@@ -1279,7 +1342,8 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             RegionWidth = _selectedRegion.Width,
             RegionHeight = _selectedRegion.Height,
             ProfileName = _profileName,
-            TranslationMode = _translationMode
+            TranslationMode = _translationMode,
+            Story = JsonSerializer.Deserialize<StorySettings>(JsonSerializer.Serialize(_storySettings)) ?? new()
         };
 
         await _appSettingsService.SaveAsync(settings);
@@ -1510,6 +1574,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         StopPlay();
+        _pipeline.Dispose();
         try
         {
             _playCts?.Dispose();

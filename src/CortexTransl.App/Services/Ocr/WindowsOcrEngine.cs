@@ -1,5 +1,6 @@
 using CortexTransl.App.Models;
 using CortexTransl.App.Utils;
+using CortexTransl.App.Services.Capture;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -14,6 +15,10 @@ namespace CortexTransl.App.Services.Ocr;
 
 public sealed class WindowsOcrEngine : IOcrEngine
 {
+    private string? _engineLanguage;
+    private OcrEngine? _engine;
+    private DateTimeOffset _nextRecoveryPass;
+    private string? _recoveryFingerprint;
     public string Id => "windows";
 
     public async Task<OcrResult> RecognizeAsync(
@@ -29,28 +34,56 @@ public sealed class WindowsOcrEngine : IOcrEngine
             var useSmallText = captureKind.Equals("list", StringComparison.OrdinalIgnoreCase)
                 || bitmap.Height < 420
                 || bitmap.Width < 980;
-            var preset = useSmallText ? "small-text" : "normal";
+            // Windows OCR can lose two-letter words after polarity inversion or
+            // unnecessary enlargement. Start with original pixels, then adapt
+            // only when recognition is empty.
+            var preset = captureKind.Equals("list", StringComparison.OrdinalIgnoreCase) && useSmallText ? "small-text" : "original";
             using var preprocessed = OcrImagePreprocessor.Preprocess(bitmap, preset);
             using var softwareBitmap = await ToSoftwareBitmapAsync(preprocessed.Bitmap, cancellationToken);
 
-            var engine = CreateEngine(sourceLanguage);
+            if (_engineLanguage != sourceLanguage || _engine is null)
+            {
+                _engine = CreateEngine(sourceLanguage);
+                _engineLanguage = sourceLanguage;
+            }
+            var engine = _engine;
             if (engine is null)
             {
-                return new OcrResult(string.Empty);
+                throw new InvalidOperationException($"Windows OCR for {sourceLanguage} is unavailable. Install that Windows language's OCR feature.");
             }
 
             var result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
-            return ToOcrResult(result, preprocessed.Scale, bitmap.Width, bitmap.Height, sourceLanguage,
+            var recognized = ToOcrResult(result, preprocessed.Scale, bitmap.Width, bitmap.Height, sourceLanguage,
                 captureKind.Equals("list", StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(recognized.Text))
+            {
+                var fingerprint = ImageFingerprint.Compute(bitmap);
+                // The throttle applies only to repeated failed images. A new short
+                // line must get its own recovery passes immediately.
+                if (_recoveryFingerprint != fingerprint || DateTimeOffset.UtcNow >= _nextRecoveryPass)
+                {
+                    _recoveryFingerprint = fingerprint;
+                    _nextRecoveryPass = DateTimeOffset.UtcNow.AddSeconds(1);
+                    using var recovery = OcrImagePreprocessor.Preprocess(bitmap, "reduced-text");
+                    using var recoveryBitmap = await ToSoftwareBitmapAsync(recovery.Bitmap, cancellationToken);
+                    var retry = await engine.RecognizeAsync(recoveryBitmap).AsTask(cancellationToken);
+                    recognized = ToOcrResult(retry, recovery.Scale, bitmap.Width, bitmap.Height, sourceLanguage,
+                        captureKind.Equals("list", StringComparison.OrdinalIgnoreCase), recovery.OffsetX, recovery.OffsetY);
+                    if (string.IsNullOrWhiteSpace(recognized.Text))
+                    {
+                        using var enlarged = OcrImagePreprocessor.Preprocess(bitmap, "auto-recovery");
+                        using var enlargedBitmap = await ToSoftwareBitmapAsync(enlarged.Bitmap, cancellationToken);
+                        var lastAttempt = await engine.RecognizeAsync(enlargedBitmap).AsTask(cancellationToken);
+                        recognized = ToOcrResult(lastAttempt, enlarged.Scale, bitmap.Width, bitmap.Height, sourceLanguage,
+                            captureKind.Equals("list", StringComparison.OrdinalIgnoreCase), enlarged.OffsetX, enlarged.OffsetY);
+                    }
+                }
+            }
+            return recognized;
         }
         catch (OperationCanceledException)
         {
             throw;
-        }
-        catch (Exception ex)
-        {
-            AppLog.Write("ocr", ex);
-            return new OcrResult(string.Empty);
         }
     }
 
@@ -66,11 +99,11 @@ public sealed class WindowsOcrEngine : IOcrEngine
             var language = new Language(sourceLanguage);
             return OcrEngine.IsLanguageSupported(language)
                 ? OcrEngine.TryCreateFromLanguage(language)
-                : OcrEngine.TryCreateFromUserProfileLanguages();
+                : null;
         }
         catch (ArgumentException)
         {
-            return OcrEngine.TryCreateFromUserProfileLanguages();
+            return null;
         }
     }
 
@@ -80,7 +113,9 @@ public sealed class WindowsOcrEngine : IOcrEngine
         int width,
         int height,
         string sourceLanguage,
-        bool listMode)
+        bool listMode,
+        int offsetX = 0,
+        int offsetY = 0)
     {
         var blocks = new List<OcrTextBlock>();
         var safeScale = scale <= 0 ? 1 : scale;
@@ -93,7 +128,7 @@ public sealed class WindowsOcrEngine : IOcrEngine
                 continue;
             }
 
-            var bounds = ToBounds(line.Words, safeScale, width, height);
+            var bounds = ToBounds(line.Words, safeScale, width, height, offsetX, offsetY);
             if (bounds.IsEmpty)
             {
                 continue;
@@ -121,15 +156,17 @@ public sealed class WindowsOcrEngine : IOcrEngine
         IReadOnlyList<Windows.Media.Ocr.OcrWord> words,
         double scale,
         int width,
-        int height)
+        int height,
+        int offsetX,
+        int offsetY)
     {
         var left = words.Min(word => word.BoundingRect.X);
         var top = words.Min(word => word.BoundingRect.Y);
         var right = words.Max(word => word.BoundingRect.X + word.BoundingRect.Width);
         var bottom = words.Max(word => word.BoundingRect.Y + word.BoundingRect.Height);
 
-        var x = Clamp((int)Math.Floor(left / scale) - 2, 0, Math.Max(0, width - 1));
-        var y = Clamp((int)Math.Floor(top / scale) - 2, 0, Math.Max(0, height - 1));
+        var x = Clamp((int)Math.Floor(left / scale) + offsetX - 2, 0, Math.Max(0, width - 1));
+        var y = Clamp((int)Math.Floor(top / scale) + offsetY - 2, 0, Math.Max(0, height - 1));
         var blockWidth = Clamp((int)Math.Ceiling((right - left) / scale) + 4, 8, width - x);
         var blockHeight = Clamp((int)Math.Ceiling((bottom - top) / scale) + 4, 10, height - y);
         return new CaptureRegion(x, y, blockWidth, blockHeight);
@@ -194,6 +231,11 @@ public sealed class WindowsOcrEngine : IOcrEngine
                         rowBytes);
                 }
             }
+        }
+        catch
+        {
+            softwareBitmap.Dispose();
+            throw;
         }
         finally
         {

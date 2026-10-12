@@ -13,10 +13,15 @@ public static class OcrImagePreprocessor
 
     public static OcrPreprocessedImage Preprocess(Bitmap source, string preset)
     {
-        var options = OcrPreprocessingOptions.FromPreset(preset);
-        var scaled = ScaleForOcr(source, options);
+        var options = preset is "auto" or "auto-contrast" or "auto-recovery"
+            ? SelectAdaptiveOptions(source, preset == "auto-contrast")
+            : OcrPreprocessingOptions.FromPreset(preset);
+        if (preset == "auto-recovery") options = options with { MinimumScale = 2.0, MaximumScale = 3.0 };
+        var crop = preset == "auto-recovery" ? FindUniformBackgroundTextBounds(source) : new Rectangle(0, 0, source.Width, source.Height);
+        using var cropped = crop.Width == source.Width && crop.Height == source.Height ? null : source.Clone(crop, PixelFormat.Format32bppArgb);
+        var scaled = ScaleForOcr(cropped ?? source, options, crop.X, crop.Y);
 
-        if (options.Grayscale || options.ContrastFactor != 1.0 || options.Threshold)
+        if (options.Grayscale || options.ContrastFactor != 1.0 || options.Threshold || options.Invert)
         {
             EnhanceForOcr(scaled.Bitmap, options);
         }
@@ -29,7 +34,77 @@ public static class OcrImagePreprocessor
         return scaled;
     }
 
-    private static OcrPreprocessedImage ScaleForOcr(Bitmap source, OcrPreprocessingOptions options)
+    private static unsafe Rectangle FindUniformBackgroundTextBounds(Bitmap source)
+    {
+        var full = new Rectangle(0, 0, source.Width, source.Height);
+        if (source.Width < 32 || source.Height < 24) return full;
+        var background = source.GetPixel(0, 0);
+        // Only trim a demonstrably uniform border. Busy game scenes stay intact.
+        for (var index = 0; index < 32; index++)
+        {
+            var x = index * (source.Width - 1) / 31;
+            foreach (var y in new[] { 0, source.Height - 1 })
+            {
+                var pixel = source.GetPixel(x, y);
+                if (Math.Abs(pixel.R - background.R) + Math.Abs(pixel.G - background.G) + Math.Abs(pixel.B - background.B) > 48) return full;
+            }
+        }
+        var left = source.Width; var top = source.Height; var right = -1; var bottom = -1;
+        var data = source.LockBits(full, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            for (var y = 0; y < source.Height; y++)
+            {
+                var row = (byte*)data.Scan0 + y * data.Stride;
+                for (var x = 0; x < source.Width; x++)
+                {
+                    var pixel = row + x * 4;
+                    if (Math.Abs(pixel[2] - background.R) + Math.Abs(pixel[1] - background.G) + Math.Abs(pixel[0] - background.B) <= 96) continue;
+                    left = Math.Min(left, x); right = Math.Max(right, x);
+                    top = Math.Min(top, y); bottom = Math.Max(bottom, y);
+                }
+            }
+        }
+        finally { source.UnlockBits(data); }
+        if (right - left < 2 || bottom - top < 2) return full;
+        var bounds = Rectangle.FromLTRB(Math.Max(0, left - 16), Math.Max(0, top - 16),
+            Math.Min(source.Width, right + 17), Math.Min(source.Height, bottom + 17));
+        return (long)bounds.Width * bounds.Height < (long)source.Width * source.Height * 3 / 4 ? bounds : full;
+    }
+
+    private static OcrPreprocessingOptions SelectAdaptiveOptions(Bitmap source, bool threshold)
+    {
+        // A bounded luminance histogram selects polarity and an Otsu threshold.
+        // Soft grayscale is the first pass; thresholding is a recovery pass only.
+        var histogram = new int[256];
+        var total = 0;
+        long sum = 0;
+        for (var y = 0; y < source.Height; y += Math.Max(1, source.Height / 16))
+        for (var x = 0; x < source.Width; x += Math.Max(1, source.Width / 32))
+        {
+            var pixel = source.GetPixel(x, y);
+            var luma = (pixel.R * 77 + pixel.G * 150 + pixel.B * 29) >> 8;
+            histogram[luma]++; total++; sum += luma;
+        }
+        long backgroundSum = 0;
+        var backgroundWeight = 0;
+        var bestVariance = -1.0;
+        byte cutoff = 128;
+        for (var level = 0; level < 255; level++)
+        {
+            backgroundWeight += histogram[level];
+            backgroundSum += level * histogram[level];
+            var foregroundWeight = total - backgroundWeight;
+            if (backgroundWeight == 0 || foregroundWeight == 0) continue;
+            var difference = (double)backgroundSum / backgroundWeight - (double)(sum - backgroundSum) / foregroundWeight;
+            var variance = (double)backgroundWeight * foregroundWeight * difference * difference;
+            if (variance > bestVariance) { bestVariance = variance; cutoff = (byte)level; }
+        }
+        return new("Adaptive subtitles", 1.0, 2.5, threshold ? 1.0 : 1.15,
+            true, false, threshold, cutoff, true, Invert: total > 0 && sum / total < 110);
+    }
+
+    private static OcrPreprocessedImage ScaleForOcr(Bitmap source, OcrPreprocessingOptions options, int offsetX = 0, int offsetY = 0)
     {
         var scale = options.MinimumScale;
 
@@ -62,81 +137,62 @@ public static class OcrImagePreprocessor
         graphics.Clear(Color.White);
         graphics.CompositingQuality = CompositingQuality.HighQuality;
         graphics.InterpolationMode = scale > 1
-            ? InterpolationMode.HighQualityBicubic
+            ? InterpolationMode.HighQualityBilinear
             : InterpolationMode.NearestNeighbor;
         graphics.SmoothingMode = SmoothingMode.HighQuality;
         graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        graphics.DrawImage(source, 0, 0, width, height);
+        if (options.Name == "Reduced text")
+        {
+            graphics.InterpolationMode = InterpolationMode.Bilinear;
+            graphics.PixelOffsetMode = PixelOffsetMode.Default;
+            graphics.CompositingQuality = CompositingQuality.Default;
+            graphics.SmoothingMode = SmoothingMode.None;
+        }
+        if (width == source.Width && height == source.Height) graphics.DrawImageUnscaled(source, 0, 0);
+        else graphics.DrawImage(source, 0, 0, width, height);
 
-        return new OcrPreprocessedImage(result, scale, options.Name);
+        return new OcrPreprocessedImage(result, scale, options.Name, offsetX, offsetY);
     }
 
-    private static void EnhanceForOcr(Bitmap bitmap, OcrPreprocessingOptions options)
+    private static unsafe void EnhanceForOcr(Bitmap bitmap, OcrPreprocessingOptions options)
     {
-        var rectangle = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
-        var data = bitmap.LockBits(rectangle, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
-        var byteCount = Math.Abs(data.Stride) * bitmap.Height;
-        var pixels = new byte[byteCount];
-
+        Span<byte> lookup = stackalloc byte[256];
+        for (var level = 0; level < 256; level++)
+        {
+            var enhanced = ClampToByte(128 + ((level - 128) * options.ContrastFactor));
+            if (options.Threshold) enhanced = enhanced > options.ThresholdValue ? (byte)255 : (byte)0;
+            else if (enhanced > 246) enhanced = 255;
+            else if (enhanced < 10) enhanced = 0;
+            lookup[level] = options.Invert ? (byte)(255 - enhanced) : enhanced;
+        }
+        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
         try
         {
-            Marshal.Copy(data.Scan0, pixels, 0, byteCount);
-
+            // ScaleForOcr draws onto opaque white first. No per-frame pixel arrays
+            // or alpha compositing are required here.
             for (var y = 0; y < bitmap.Height; y++)
             {
-                var rowOffset = y * Math.Abs(data.Stride);
+                var row = (byte*)data.Scan0 + y * data.Stride;
                 for (var x = 0; x < bitmap.Width; x++)
                 {
-                    var offset = rowOffset + x * 4;
-                    var blue = pixels[offset];
-                    var green = pixels[offset + 1];
-                    var red = pixels[offset + 2];
-                    var alpha = pixels[offset + 3] / 255.0;
-
-                    var compositedRed = (red * alpha) + (255 * (1 - alpha));
-                    var compositedGreen = (green * alpha) + (255 * (1 - alpha));
-                    var compositedBlue = (blue * alpha) + (255 * (1 - alpha));
-                    var gray = (int)Math.Round((0.299 * compositedRed) + (0.587 * compositedGreen) + (0.114 * compositedBlue));
-                    var enhanced = ClampToByte(128 + ((gray - 128) * options.ContrastFactor));
-
-                    if (options.Threshold)
-                    {
-                        enhanced = enhanced >= options.ThresholdValue ? (byte)255 : (byte)0;
-                    }
-                    else if (enhanced > 246)
-                    {
-                        enhanced = 255;
-                    }
-                    else if (enhanced < 10)
-                    {
-                        enhanced = 0;
-                    }
-
+                    var pixel = row + x * 4;
                     if (options.Grayscale || options.Threshold)
                     {
-                        pixels[offset] = enhanced;
-                        pixels[offset + 1] = enhanced;
-                        pixels[offset + 2] = enhanced;
+                        var gray = (pixel[2] * 77 + pixel[1] * 150 + pixel[0] * 29) >> 8;
+                        pixel[0] = pixel[1] = pixel[2] = lookup[gray];
                     }
                     else
                     {
-                        pixels[offset] = ClampToByte(128 + ((compositedBlue - 128) * options.ContrastFactor));
-                        pixels[offset + 1] = ClampToByte(128 + ((compositedGreen - 128) * options.ContrastFactor));
-                        pixels[offset + 2] = ClampToByte(128 + ((compositedRed - 128) * options.ContrastFactor));
+                        pixel[0] = lookup[pixel[0]];
+                        pixel[1] = lookup[pixel[1]];
+                        pixel[2] = lookup[pixel[2]];
                     }
-
-                    pixels[offset + 3] = 255;
+                    pixel[3] = 255;
                 }
             }
-
-            Marshal.Copy(pixels, 0, data.Scan0, byteCount);
         }
-        finally
-        {
-            bitmap.UnlockBits(data);
-        }
+        finally { bitmap.UnlockBits(data); }
     }
-
     private static void Sharpen(Bitmap bitmap)
     {
         using var source = (Bitmap)bitmap.Clone();
@@ -150,7 +206,7 @@ public static class OcrImagePreprocessor
         try
         {
             Marshal.Copy(sourceData.Scan0, sourcePixels, 0, byteCount);
-            Marshal.Copy(targetData.Scan0, targetPixels, 0, byteCount);
+            Array.Copy(sourcePixels, targetPixels, byteCount);
 
             for (var y = 1; y < bitmap.Height - 1; y++)
             {
@@ -212,12 +268,15 @@ public static class OcrImagePreprocessor
         bool Sharpen,
         bool Threshold,
         byte ThresholdValue,
-        bool UseSmallTextTargets)
+        bool UseSmallTextTargets,
+        bool Invert = false)
     {
         public static OcrPreprocessingOptions FromPreset(string preset)
         {
             return preset.Trim().ToLowerInvariant() switch
             {
+                "original" => new OcrPreprocessingOptions("Original colors", 1.0, 1.0, 1.0, false, false, false, 128, false),
+                "reduced-text" => new OcrPreprocessingOptions("Reduced text", 0.6, 0.6, 1.0, false, false, false, 128, false),
                 "small-text" => new OcrPreprocessingOptions(
                     "Small Text",
                     2.0,
@@ -255,11 +314,13 @@ public static class OcrImagePreprocessor
 
 public sealed class OcrPreprocessedImage : IDisposable
 {
-    public OcrPreprocessedImage(Bitmap bitmap, double scale, string presetName)
+    public OcrPreprocessedImage(Bitmap bitmap, double scale, string presetName, int offsetX = 0, int offsetY = 0)
     {
         Bitmap = bitmap;
         Scale = scale;
         PresetName = presetName;
+        OffsetX = offsetX;
+        OffsetY = offsetY;
     }
 
     public Bitmap Bitmap { get; }
@@ -267,6 +328,8 @@ public sealed class OcrPreprocessedImage : IDisposable
     public double Scale { get; }
 
     public string PresetName { get; }
+    public int OffsetX { get; }
+    public int OffsetY { get; }
 
     public void Dispose()
     {

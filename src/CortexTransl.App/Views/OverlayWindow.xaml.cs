@@ -169,9 +169,13 @@ public partial class OverlayWindow : Window
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
+        SetWindowDisplayAffinity(new WindowInteropHelper(this).Handle, 0x00000011);
         ApplyExtendedStyles();
         ReapplyLockedPlacement();
     }
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowDisplayAffinity(nint window, uint affinity);
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {

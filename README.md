@@ -266,3 +266,7 @@ The app stores its data at:
 Built with ❤️ for Arabic gamers — **Cortex Transl v1.6.0**
 
 </div>
+
+## Story dialogue reliability
+
+See [the reliability upgrade report](docs/STORY_TRANSLATION_RELIABILITY.md) for story context and terminology setup, subtitle timing, window-bound capture behavior, automated test evidence, measured performance, and real-game verification limits.

@@ -76,19 +76,11 @@ public static partial class DialogueTextAssembler
     {
         var last = TextNormalizer.Normalize(previous);
         var next = TextNormalizer.Normalize(current);
-        if (last.Length < 12 || next.Length == 0)
-        {
-            return false;
-        }
-
-        if (next.Length <= last.Length / 3
-            && !last.StartsWith(next, StringComparison.Ordinal)
-            && !next.StartsWith(last, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return false;
+        // Length is not evidence of corruption: "No!" can follow a paragraph.
+        // Only an unterminated prefix of the *same* line is a likely lost OCR tail.
+        return next.Length >= 2 && next.Length < last.Length
+            && last.StartsWith(next, StringComparison.Ordinal)
+            && !TextSimilarity.LooksComplete(next);
     }
 
     private static string JoinReadingOrder(

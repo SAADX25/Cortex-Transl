@@ -4,11 +4,23 @@ using System.Text;
 
 namespace CortexTransl.App.Services.Capture;
 
-internal sealed record CaptureWindowTarget(nint Handle, CaptureRegion Bounds, nint DesktopView = default)
+internal sealed record CaptureWindowTarget(nint Handle, CaptureRegion Bounds, nint DesktopView = default, uint ProcessId = 0)
 {
+    public CaptureWindowTarget? Refresh(CaptureRegion region)
+    {
+        if (!IsWindowVisible(Handle) || IsIconic(Handle)) return null;
+        GetWindowThreadProcessId(Handle, out var processId);
+        if (processId != ProcessId) return null;
+        if (DwmGetWindowAttribute(Handle, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return null;
+        if (DwmGetWindowAttribute(Handle, 9, out NativeRect bounds, Marshal.SizeOf<NativeRect>()) != 0
+            && !GetWindowRect(Handle, out bounds)) return null;
+        if (bounds.Left > region.X || bounds.Top > region.Y || bounds.Right < region.X + region.Width
+            || bounds.Bottom < region.Y + region.Height) return null;
+        return this with { Bounds = new(bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top) };
+    }
     // EnumWindows visits windows from front to back. Skip our own overlay and
     // tool windows, and require the complete OCR region to fit in the source.
-    public static CaptureWindowTarget? Find(CaptureRegion region)
+    public static CaptureWindowTarget? Find(CaptureRegion region, bool allowDesktop = false)
     {
         CaptureWindowTarget? target = null;
         EnumWindows((window, _) =>
@@ -29,6 +41,7 @@ internal sealed record CaptureWindowTarget(nint Handle, CaptureRegion Bounds, ni
             var desktopView = FindDesktopView(window);
             var windowClass = new StringBuilder(256);
             GetClassName(window, windowClass, windowClass.Capacity);
+            if (!allowDesktop && windowClass.ToString() is "Progman" or "WorkerW") return true;
             if (windowClass.ToString() is "Progman" or "WorkerW" && desktopView == nint.Zero)
             {
                 // A wallpaper-only shell window cannot supply icon captions.
@@ -57,7 +70,7 @@ internal sealed record CaptureWindowTarget(nint Handle, CaptureRegion Bounds, ni
             }
 
             target = new CaptureWindowTarget(window, new CaptureRegion(
-                bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top), desktopView);
+                bounds.Left, bounds.Top, bounds.Right - bounds.Left, bounds.Bottom - bounds.Top), desktopView, processId);
             return false;
         }, nint.Zero);
 

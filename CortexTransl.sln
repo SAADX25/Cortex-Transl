@@ -4,6 +4,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CortexTransl.App", "src\CortexTransl.App\CortexTransl.App.csproj", "{28C00C8B-6F12-468C-A1B7-6C635BA2AB9D}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CortexTransl.Tests", "tests\CortexTransl.Tests\CortexTransl.Tests.csproj", "{5EB23539-BD83-4A2C-A041-55EC9FA87772}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -14,5 +16,9 @@ Global
 		{28C00C8B-6F12-468C-A1B7-6C635BA2AB9D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{28C00C8B-6F12-468C-A1B7-6C635BA2AB9D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{28C00C8B-6F12-468C-A1B7-6C635BA2AB9D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5EB23539-BD83-4A2C-A041-55EC9FA87772}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5EB23539-BD83-4A2C-A041-55EC9FA87772}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5EB23539-BD83-4A2C-A041-55EC9FA87772}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5EB23539-BD83-4A2C-A041-55EC9FA87772}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

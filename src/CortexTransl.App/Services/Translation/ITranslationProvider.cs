@@ -6,6 +6,16 @@ public interface ITranslationProvider
 
     bool SupportsContextualLongText { get; }
 
+    // Engines without contextual support translate only the current utterance.
+    Task<string> TranslateStoryAsync(string text, string sourceLanguage, string targetLanguage,
+        StoryTranslationContext context, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (context.TryExactArabicTerm(text, sourceLanguage, targetLanguage, out var term))
+            return Task.FromResult(term);
+        return TranslateAsync(text, sourceLanguage, targetLanguage, cancellationToken, TranslationContentKind.GameDialogue);
+    }
+
     Task<string> TranslateAsync(
         string text,
         string sourceLanguage,

@@ -2,6 +2,7 @@ namespace CortexTransl.App.Models;
 
 public sealed class AppSettings
 {
+    public StorySettings Story { get; set; } = new();
     public string EncryptedDeepLApiKey { get; set; } = string.Empty;
 
     public bool UseDeepLFreeApi { get; set; } = true;

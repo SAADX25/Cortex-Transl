@@ -22,6 +22,10 @@ public sealed class RoutingTranslationProvider : ITranslationProvider
 
     private bool UseOffline => _settings.UseOfflineEngine;
 
+    public Task<string> TranslateStoryAsync(string text, string sourceLanguage, string targetLanguage,
+        StoryTranslationContext context, CancellationToken cancellationToken = default)
+        => Active.TranslateStoryAsync(text, sourceLanguage, targetLanguage, context, cancellationToken);
+
     public Task<string> TranslateAsync(
         string text,
         string sourceLanguage,

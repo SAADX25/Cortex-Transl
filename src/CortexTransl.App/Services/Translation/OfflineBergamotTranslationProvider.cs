@@ -19,6 +19,19 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
 
     public bool SupportsContextualLongText => false;
 
+    public async Task<string> TranslateStoryAsync(string text, string sourceLanguage, string targetLanguage,
+        StoryTranslationContext context, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (context.TryExactArabicTerm(text, sourceLanguage, targetLanguage, out var term)) return term;
+        var chunks = TranslationChunker.Split(text);
+        var translated = await TranslateManyAsync(chunks, sourceLanguage, targetLanguage, cancellationToken, TranslationContentKind.GameDialogue);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (translated.Count != chunks.Count || translated.Any(string.IsNullOrWhiteSpace))
+            throw new TranslationProviderException("Offline translation returned incomplete dialogue.", "offline incomplete result");
+        return TranslationChunker.Join(translated);
+    }
+
     public bool IsEnglishArabicReady => _installer.IsPairReady("en-ar");
 
     public async Task EnsureReadyAsync(
@@ -121,7 +134,7 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
             return existing;
         }
 
-        var configs = directions.Select(_installer.GetConfigPath).ToArray();
+        var configs = directions.Select(_installer.GetRuntimeConfigPath).ToArray();
         BlockingService service;
         try
         {
