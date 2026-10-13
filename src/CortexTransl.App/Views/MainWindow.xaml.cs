@@ -129,7 +129,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if ((e.Key == Key.System && e.SystemKey == Key.F10) || e.Key == Key.F10)
+        if (e.Key == Key.F10)
         {
             e.Handled = true;
             if (!_hotkeyService.IsRegistered(Key.F10))
@@ -222,16 +222,9 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
-        try
-        {
-            _viewModel.MinimizeRequested -= OnMinimizeRequested;
-            _hotkeyService.Dispose();
-            _viewModel.Dispose();
-            _screenCapture.Dispose();
-        }
-        catch (Exception ex)
-        {
-            AppLog.Write("shutdown", ex);
-        }
+        _viewModel.MinimizeRequested -= OnMinimizeRequested;
+        ResourceCleanup.Dispose(_hotkeyService, "hotkeys-shutdown");
+        ResourceCleanup.Dispose(_viewModel, "viewmodel-shutdown");
+        ResourceCleanup.Dispose(_screenCapture, "capture-shutdown");
     }
 }

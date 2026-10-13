@@ -23,6 +23,8 @@ internal sealed class FakeCapture : IScreenCaptureService
     private int _frame;
     public bool SameFrame { get; set; }
     public int Captures { get; private set; }
+    public int ReleasedSessions { get; private set; }
+    public void ReleaseSession() => ReleasedSessions++;
     public Exception? Failure { get; set; }
     public Task<Bitmap> CaptureAsync(CaptureRegion region, CancellationToken cancellationToken = default)
     {
@@ -56,6 +58,7 @@ internal sealed class FakeOcr : IOcrEngine
 
 internal sealed class FakeCache : ITranslationCacheRepository
 {
+    public TaskCompletionSource Saved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<(string, string, string, string), string> _values = new();
     public int Count => _values.Count;
     public Task<string?> GetAsync(string text, string source, string target, string provider, CancellationToken cancellationToken = default)
@@ -67,6 +70,7 @@ internal sealed class FakeCache : ITranslationCacheRepository
     {
         cancellationToken.ThrowIfCancellationRequested();
         _values[(text, source, target, provider)] = translated;
+        Saved.TrySetResult();
         return Task.CompletedTask;
     }
 }

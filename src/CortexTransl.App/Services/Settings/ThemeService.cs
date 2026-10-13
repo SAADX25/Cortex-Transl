@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using CortexTransl.App.Utils;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -10,8 +11,10 @@ public sealed class ThemeService
     private const string LightTheme = "Light";
     private const string DarkTheme = "Dark";
     private const string SystemTheme = "System";
-    private const string LightThemePath = "Views/Styles/Theme.Light.xaml";
-    private const string DarkThemePath = "Views/Styles/Theme.Dark.xaml";
+    // Resolve dictionaries from the application assembly, including when a
+    // Windows test host is the entry assembly.
+    private const string LightThemePath = "/CortexTransl.App;component/Views/Styles/Theme.Light.xaml";
+    private const string DarkThemePath = "/CortexTransl.App;component/Views/Styles/Theme.Dark.xaml";
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaUseImmersiveDarkModeBefore20H1 = 19;
 
@@ -82,8 +85,9 @@ public sealed class ThemeService
                 ? DarkTheme
                 : LightTheme;
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Write("system-theme", ex);
             return LightTheme;
         }
     }
@@ -122,9 +126,10 @@ public sealed class ThemeService
                 DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkModeBefore20H1, ref value, size);
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Native title-bar theming is best effort and must never block the app.
+            AppLog.Write("title-bar-theme", ex);
         }
     }
 

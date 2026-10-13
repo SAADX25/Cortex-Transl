@@ -62,8 +62,6 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
         return TranslationChunker.Join(translated);
     }
 
-    public bool IsEnglishArabicReady => _installer.IsPairReady("en-ar");
-
     public async Task EnsureReadyAsync(
         string sourceLanguage,
         IProgress<string>? progress = null,
@@ -214,13 +212,7 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
             _disposed = true;
             foreach (var service in _services.Values)
             {
-                try
-                {
-                    service.Dispose();
-                }
-                catch
-                {
-                }
+                ResourceCleanup.Dispose(service, "offline-service-dispose");
             }
 
             _services.Clear();

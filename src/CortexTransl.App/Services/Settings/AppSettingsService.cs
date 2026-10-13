@@ -9,6 +9,7 @@ namespace CortexTransl.App.Services.Settings;
 
 public sealed class AppSettingsService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private readonly string _settingsFilePath;
     private readonly SemaphoreSlim _saveLock = new(1, 1);
 
@@ -68,7 +69,7 @@ public sealed class AppSettingsService
                 await JsonSerializer.SerializeAsync(
                     stream,
                     settings,
-                    new JsonSerializerOptions { WriteIndented = true },
+                    JsonOptions,
                     cancellationToken);
                 await stream.FlushAsync(cancellationToken);
             }
@@ -114,8 +115,10 @@ public sealed class AppSettingsService
             var decryptedBytes = ProtectedData.Unprotect(encryptedBytes, null, DataProtectionScope.CurrentUser);
             return Encoding.UTF8.GetString(decryptedBytes);
         }
-        catch
+        catch (Exception ex)
         {
+            // Do not log ciphertext, key bytes, or exception details.
+            AppLog.Write("api-key-decrypt", $"Saved API key could not be decrypted ({ex.GetType().Name}). Re-enter the key.");
             return string.Empty;
         }
     }
@@ -133,8 +136,9 @@ public sealed class AppSettingsService
             var encryptedBytes = ProtectedData.Protect(plainBytes, null, DataProtectionScope.CurrentUser);
             return Convert.ToBase64String(encryptedBytes);
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Write("api-key-encrypt", $"API key could not be encrypted ({ex.GetType().Name}).");
             return string.Empty;
         }
     }

@@ -55,6 +55,12 @@ internal sealed class AnimatedSubtitleFixture : IAsyncDisposable
 
     public async Task ReadyAsync() => await _ready.Task.WaitAsync(TimeSpan.FromSeconds(10));
     public async Task SetAnimationAsync(bool enabled) => await _dispatcher.InvokeAsync(() => _surface.AnimationEnabled = enabled);
+    public async Task MinimizeAsync() => await _dispatcher.InvokeAsync(() => _source.WindowState = WindowState.Minimized);
+    public async Task RestoreAsync()
+    {
+        await _dispatcher.InvokeAsync(() => { _source.WindowState = WindowState.Normal; _source.UpdateLayout(); });
+        await NextRenderAsync();
+    }
     public async Task<long> PresentAsync(string text)
     {
         await _dispatcher.InvokeAsync(() => { _overlay.Hide(); _surface.Line = text; _surface.InvalidateVisual(); });

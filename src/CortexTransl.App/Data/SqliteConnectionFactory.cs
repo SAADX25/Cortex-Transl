@@ -7,7 +7,13 @@ namespace CortexTransl.App.Data;
 
 public sealed class SqliteConnectionFactory
 {
-    private static int _sqliteInitialized;
+    // Publish initialization only after the native provider is ready. An
+    // Interlocked flag allowed another thread to open SQLite during Init().
+    private static readonly Lazy<bool> SqliteInitialized = new(() =>
+    {
+        Batteries_V2.Init();
+        return true;
+    });
 
     public string DatabasePath { get; }
 
@@ -18,18 +24,12 @@ public sealed class SqliteConnectionFactory
 
     public SqliteConnection CreateConnection()
     {
-        EnsureSqliteInitialized();
+        _ = SqliteInitialized.Value;
         Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
-        return new SqliteConnection($"Data Source={DatabasePath};Mode=ReadWriteCreate;Cache=Shared;Default Timeout=5");
-    }
-
-    private static void EnsureSqliteInitialized()
-    {
-        if (Interlocked.Exchange(ref _sqliteInitialized, 1) == 1)
+        return new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            return;
-        }
-
-        Batteries_V2.Init();
+            DataSource = DatabasePath, Mode = SqliteOpenMode.ReadWriteCreate,
+            Cache = SqliteCacheMode.Shared, DefaultTimeout = 5
+        }.ToString());
     }
 }

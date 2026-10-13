@@ -86,7 +86,6 @@ public sealed class OverlayService : IOverlayService
             if (_window?.IsVisible == true)
             {
                 _window.Hide();
-                _window.ResetCapturePlacement();
             }
         });
     }
@@ -116,8 +115,10 @@ public sealed class OverlayService : IOverlayService
                 _window.BringToFront();
             }
         }
-        catch
+        catch (Exception ex)
         {
+            _topmostTimer.Stop();
+            AppLog.Write("overlay-topmost", ex);
         }
     }
 

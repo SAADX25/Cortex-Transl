@@ -1,6 +1,5 @@
 using CortexTransl.App.Models;
 using CortexTransl.App.Utils;
-using CortexTransl.App.Views;
 using CortexTransl.App.Services.Diagnostics;
 using System.Drawing;
 
@@ -9,13 +8,23 @@ namespace CortexTransl.App.Services.Capture;
 public sealed class ScreenCaptureService : IScreenCaptureService
 {
     private readonly PerformanceDiagnostics _diagnostics;
-    public ScreenCaptureService(PerformanceDiagnostics? diagnostics = null) { _diagnostics = diagnostics ?? new(); }
+    private readonly Func<CaptureRegion, bool, CaptureWindowTarget?> _findTarget;
+    public ScreenCaptureService(PerformanceDiagnostics? diagnostics = null)
+        : this(diagnostics ?? new(), CaptureWindowTarget.Find) { }
+
+    internal ScreenCaptureService(PerformanceDiagnostics diagnostics, Func<CaptureRegion, bool, CaptureWindowTarget?> findTarget)
+    {
+        _diagnostics = diagnostics;
+        _findTarget = findTarget;
+    }
     private readonly object _gate = new();
     private WindowsGraphicsWindowCapturer? _capturer;
     private DateTime _nextGraphicsCaptureAttemptUtc;
     private CaptureWindowTarget? _boundTarget;
     private bool _bindingAttempted;
     private bool _listMode;
+    private bool _suspended;
+    private bool _disposed;
     private readonly string _sessionIdentity = Guid.NewGuid().ToString("N");
     private string? _cacheIdentity;
     public string CacheIdentity { get { lock (_gate) return _cacheIdentity ?? _sessionIdentity; } }
@@ -24,10 +33,12 @@ public sealed class ScreenCaptureService : IScreenCaptureService
     {
         lock (_gate)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _suspended = false;
             if (onlyIfUnbound && _bindingAttempted && _listMode == listMode) return;
             _bindingAttempted = true;
             _listMode = listMode;
-            _boundTarget = CaptureWindowTarget.Find(region, allowDesktop: listMode);
+            _boundTarget = _findTarget(region, listMode);
             _cacheIdentity = _sessionIdentity;
             try
             {
@@ -43,89 +54,80 @@ public sealed class ScreenCaptureService : IScreenCaptureService
                 // A protected process gets a session-specific scope rather than
                 // a shared executable-name scope that could collide with a game.
             }
-            _capturer?.Dispose();
-            _capturer = null;
-            _nextGraphicsCaptureAttemptUtc = DateTime.MinValue;
+            ResetCapturer(TimeSpan.Zero);
         }
     }
 
     public Task<Bitmap> CaptureAsync(CaptureRegion region, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        region = ScreenCoordinates.ClampToVirtualScreen(region);
-        if (region.IsEmpty)
+        // Serialize HWND selection, readback, stop, and disposal. FrameArrived
+        // remains free-threaded and never takes this service lock.
+        lock (_gate)
         {
-            throw new InvalidOperationException("Select the dialogue region first.");
-        }
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_suspended) throw new CaptureUnavailableException("Translation capture is stopped.");
+            region = ScreenCoordinates.ClampToVirtualScreen(region);
+            if (region.IsEmpty) throw new InvalidOperationException("Select the dialogue region first.");
 
-        Bitmap? captured = null;
-        CaptureWindowTarget? target;
-        lock (_gate) target = _boundTarget?.Refresh(region);
-        if (target is null)
-            throw new CaptureUnavailableException("Selected game window is unavailable or moved. Select its dialogue again with F9.");
-        try
-        {
-            captured = TryCaptureWithGraphics(region, target);
-            // A valid GPU frame can contain a dark dialogue box. Sampling its
-            // brightness is not a reliable way to decide whether capture failed.
-            if (captured is not null)
+            var target = _boundTarget?.Refresh(region);
+            if (target is null)
             {
-                OverlayWindow.RestoreCapturePlacement(region);
-                return Task.FromResult(captured);
+                ResetCapturer(TimeSpan.Zero);
+                throw new CaptureUnavailableException("Selected game window is unavailable or moved. Select its dialogue again with F9.");
             }
-
-            captured?.Dispose();
+            // Dark GPU frames are valid; brightness is not a failure signal.
+            var captured = TryCaptureWithGraphics(region, target);
+            if (captured is null)
+            {
+                if (!_listMode)
+                    throw new CaptureUnavailableException("Window capture is unavailable. Use a windowed or borderless game and select it again with F9.");
+                captured = GdiScreenCapture.Capture(region, target);
+            }
+            if (cancellationToken.IsCancellationRequested)
+            {
+                captured.Dispose();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            return Task.FromResult(captured);
         }
-        catch (Exception ex)
+    }
+
+    public void ReleaseSession()
+    {
+        lock (_gate)
         {
-            captured?.Dispose();
-            AppLog.Write("screen-capture", ex);
-            ResetCapturer(TimeSpan.FromSeconds(2));
+            _suspended = true;
+            ResetCapturer(TimeSpan.Zero);
         }
-
-        if (!_listMode)
-            throw new CaptureUnavailableException("Window capture is unavailable. Use a windowed or borderless game and select it again with F9.");
-        return Task.FromResult(GdiScreenCapture.Capture(region, target));
     }
 
     public void Dispose()
     {
         lock (_gate)
         {
-            _capturer?.Dispose();
-            _capturer = null;
+            if (_disposed) return;
+            _disposed = true;
+            _suspended = true;
+            ResetCapturer(TimeSpan.Zero);
         }
     }
 
-    private Bitmap? TryCaptureWithGraphics(CaptureRegion region, CaptureWindowTarget? target)
+    // These helpers run only under _gate, including creation, so stop/rebind
+    // cannot publish or dispose a capturer halfway through a readback.
+    private Bitmap? TryCaptureWithGraphics(CaptureRegion region, CaptureWindowTarget target)
     {
-        if (target is null)
-        {
-            return null;
-        }
-
-        lock (_gate)
-        {
-            if (_capturer is null && DateTime.UtcNow < _nextGraphicsCaptureAttemptUtc)
-            {
-                return null;
-            }
-        }
-
+        if (_capturer is null && DateTime.UtcNow < _nextGraphicsCaptureAttemptUtc) return null;
         try
         {
-            var capturer = GetOrCreateCapturer(target.Handle);
-            if (capturer is null)
+            if (_capturer is not null && _capturer.Window != target.Handle) ResetCapturer(TimeSpan.Zero);
+            _capturer ??= WindowsGraphicsWindowCapturer.TryCreate(target.Handle, _diagnostics);
+            if (_capturer is null)
             {
-                lock (_gate)
-                {
-                    _nextGraphicsCaptureAttemptUtc = DateTime.UtcNow.AddSeconds(5);
-                }
-
+                _nextGraphicsCaptureAttemptUtc = DateTime.UtcNow.AddSeconds(5);
                 return null;
             }
-
-            return capturer.CaptureRegion(region, target.Bounds, TimeSpan.FromMilliseconds(80));
+            return _capturer.CaptureRegion(region, target.Bounds, TimeSpan.FromMilliseconds(80));
         }
         catch (Exception ex)
         {
@@ -135,55 +137,14 @@ public sealed class ScreenCaptureService : IScreenCaptureService
         }
     }
 
-    private WindowsGraphicsWindowCapturer? GetOrCreateCapturer(nint window)
-    {
-        lock (_gate)
-        {
-            if (_capturer is not null && _capturer.Window == window)
-            {
-                return _capturer;
-            }
-
-            _capturer?.Dispose();
-            _capturer = null;
-        }
-
-        var created = WindowsGraphicsWindowCapturer.TryCreate(window, _diagnostics);
-        if (created is null)
-        {
-            lock (_gate)
-            {
-                _nextGraphicsCaptureAttemptUtc = DateTime.UtcNow.AddSeconds(5);
-            }
-
-            return null;
-        }
-
-        lock (_gate)
-        {
-            _capturer?.Dispose();
-            _capturer = created;
-            _nextGraphicsCaptureAttemptUtc = DateTime.MinValue;
-            return _capturer;
-        }
-    }
-
     private void ResetCapturer(TimeSpan retryDelay)
     {
-        lock (_gate)
+        try { _capturer?.Dispose(); }
+        catch (Exception ex) { AppLog.Write("graphics-capture-dispose", ex); }
+        finally
         {
-            try
-            {
-                _capturer?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                AppLog.Write("graphics-capture-dispose", ex);
-            }
-
             _capturer = null;
             _nextGraphicsCaptureAttemptUtc = DateTime.UtcNow.Add(retryDelay);
         }
     }
-
 }

@@ -49,9 +49,10 @@ public sealed record StoryTranslationContext
         value = string.Empty;
         if (!sourceLanguage.Equals("en", StringComparison.OrdinalIgnoreCase)
             || !targetLanguage.Equals("ar", StringComparison.OrdinalIgnoreCase)) return false;
+        var normalizedSource = TextNormalizer.Normalize(source);
         foreach (var term in Terminology.Concat(SpeakerNames))
         {
-            if (TextNormalizer.Normalize(source).Equals(TextNormalizer.Normalize(term.Key), StringComparison.OrdinalIgnoreCase)
+            if (normalizedSource.Equals(TextNormalizer.Normalize(term.Key), StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(term.Value))
             { value = term.Value; return true; }
         }

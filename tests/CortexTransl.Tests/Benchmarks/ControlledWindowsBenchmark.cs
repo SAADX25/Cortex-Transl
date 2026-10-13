@@ -32,6 +32,46 @@ public sealed class WindowsBenchmarkCollection;
 public sealed class ControlledWindowsBenchmark(ITestOutputHelper output)
 {
     [ControlledWindowFact]
+    public async Task CaptureStopRestartAndWindowLossKeepSelectedTargetAndReleaseSessions()
+    {
+        await using var fixture = new AnimatedSubtitleFixture();
+        await fixture.ReadyAsync(); await fixture.PresentAsync("I can't help you.");
+        using var diagnostics = new PerformanceDiagnostics { Enabled = true };
+        var selections = 0;
+        using var capture = new ScreenCaptureService(diagnostics, (_, _) =>
+        {
+            selections++;
+            return new(fixture.Handle, fixture.Bounds, ProcessId: (uint)Environment.ProcessId);
+        });
+        capture.BindTarget(fixture.Region, false);
+        var identity = capture.CacheIdentity;
+        using (var first = await CaptureWhenReady()) Assert.Equal(fixture.Region.Width, first.Width);
+        capture.ReleaseSession();
+        await Assert.ThrowsAsync<CaptureUnavailableException>(async () => await capture.CaptureAsync(fixture.Region));
+        capture.BindTarget(fixture.Region, false, onlyIfUnbound: true);
+        Assert.Equal(1, selections); Assert.Equal(identity, capture.CacheIdentity);
+        using (var restarted = await CaptureWhenReady()) Assert.Equal(fixture.Region.Width, restarted.Width);
+        Assert.True(diagnostics.Snapshot()[nameof(LatencyStage.GpuCopyReadback)].Count >= 2);
+        await fixture.MinimizeAsync();
+        await Assert.ThrowsAsync<CaptureUnavailableException>(async () => await capture.CaptureAsync(fixture.Region));
+        await fixture.RestoreAsync();
+        using (var recovered = await CaptureWhenReady()) Assert.Equal(fixture.Region.Width, recovered.Width);
+        Assert.Equal(1, selections); // Recovery cannot enumerate a replacement window.
+        capture.Dispose(); capture.Dispose();
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () => await capture.CaptureAsync(fixture.Region));
+
+        async Task<Bitmap> CaptureWhenReady()
+        {
+            var timer = Stopwatch.StartNew();
+            while (true)
+            {
+                try { return await capture.CaptureAsync(fixture.Region); }
+                catch (CaptureUnavailableException) when (timer.Elapsed < TimeSpan.FromSeconds(3)) { await Task.Delay(40); }
+            }
+        }
+    }
+
+    [ControlledWindowFact]
     public async Task RealCaptureExcludesOverlayReusesStagingAndRetainsStaticDialogue()
     {
         await using var fixture = new AnimatedSubtitleFixture();

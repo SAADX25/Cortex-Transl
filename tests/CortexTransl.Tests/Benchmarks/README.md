@@ -22,3 +22,12 @@ because machine-dependent CI timing is not a reliable correctness assertion.
 
 See [the latency report](../../../docs/OFFLINE_SUBTITLE_LATENCY.md) for commands,
 measurements, attribution limits and real-world verification still required.
+
+The additional lifecycle integration test exercises production `ScreenCaptureService`
+stop/restart, minimized-window loss, recovery on the same selected target, and
+idempotent disposal. It supplies a fixture-only source selector because production
+selection deliberately excludes windows belonging to Cortex's own process.
+
+For an Update-19 cleanup comparison, compare the `upgraded` sections from runs at
+`117b32d` and the cleaned checkout. The `baseline` section in each JSON remains
+Update-17; it must not be mislabeled Update-19.
