@@ -3,7 +3,6 @@ using CortexTransl.App.Services.Cache;
 using CortexTransl.App.Services.Ocr;
 using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
-using System.Text.Json;
 using System.Threading.Channels;
 using System.Diagnostics;
 using CortexTransl.App.Services.Diagnostics;
@@ -74,7 +73,7 @@ public sealed class TranslationPipeline : IDisposable
 
     public void Configure(string gameKey, StorySettings settings)
     {
-        var snapshot = JsonSerializer.Deserialize<StorySettings>(JsonSerializer.Serialize(settings)) ?? new();
+        var snapshot = settings.Clone();
         var context = new StoryTranslationContext
         {
             GameKey = gameKey, Speaker = NullIfEmpty(snapshot.Speaker), SceneState = NullIfEmpty(snapshot.SceneState),

@@ -4,6 +4,8 @@ namespace CortexTransl.App.Utils;
 
 public sealed class AppDataPaths
 {
+    public static AppDataPaths Default { get; } = CreateDefault();
+
     public string DataDirectory { get; }
 
     public string DatabasePath { get; }

@@ -96,12 +96,4 @@ public static class ScreenCoordinates
         VirtualScreenHeight = 79
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativeRect(int left, int top, int right, int bottom)
-    {
-        public int Left = left;
-        public int Top = top;
-        public int Right = right;
-        public int Bottom = bottom;
-    }
 }

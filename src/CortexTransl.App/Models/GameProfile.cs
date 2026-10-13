@@ -37,13 +37,7 @@ public sealed class GameProfile
         {
             var language = string.IsNullOrWhiteSpace(SourceLanguage) ? "EN" : SourceLanguage.ToUpperInvariant();
             var mode = TranslationMode.Equals("list", StringComparison.OrdinalIgnoreCase) ? "Menus" : "Story";
-            var size = OverlayTextSize.Trim().ToLowerInvariant() switch
-            {
-                "small" => "Small",
-                "large" => "Large",
-                "xlarge" => "XL",
-                _ => "Medium"
-            };
+            var size = OverlayTextSizes.ShortLabel(OverlayTextSize);
             var color = OverlayTextColors.Label(OverlayTextColor);
             var region = Region.IsEmpty ? "No region" : $"{Region.Width} × {Region.Height}";
             return $"{language} · {mode} · {size} · {color} · {region}";

@@ -101,16 +101,6 @@ public partial class RegionSelectorWindow : Window
         }
     }
 
-    private void OnKeyDown(object sender, WpfKeyEventArgs e)
-    {
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
-        if (key == Key.Escape
-            || (e.Key != Key.System && key == Key.F9 && Keyboard.Modifiers == ModifierKeys.None))
-        {
-            e.Handled = true;
-            CloseSelector();
-        }
-    }
 
     private void CloseSelector()
     {

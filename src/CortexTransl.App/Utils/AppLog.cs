@@ -13,7 +13,7 @@ public static class AppLog
     {
         try
         {
-            var paths = AppDataPaths.CreateDefault();
+            var paths = AppDataPaths.Default;
             var line = $"{DateTimeOffset.Now:O} {source}{Environment.NewLine}{message}{Environment.NewLine}{Environment.NewLine}";
             File.AppendAllText(Path.Combine(paths.DataDirectory, "logs", "errors.log"), line);
         }

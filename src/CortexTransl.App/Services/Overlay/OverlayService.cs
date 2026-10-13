@@ -131,26 +131,5 @@ public sealed class OverlayService : IOverlayService
         _window ??= new OverlayWindow();
     }
 
-    private void RunOnUi(Action action)
-    {
-        try
-        {
-            var dispatcher = _window?.Dispatcher ?? Application.Current?.Dispatcher;
-            if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
-            {
-                return;
-            }
-
-            if (dispatcher.CheckAccess())
-            {
-                action();
-                return;
-            }
-
-            dispatcher.Invoke(action, DispatcherPriority.Send, CancellationToken.None, TimeSpan.FromMilliseconds(400));
-        }
-        catch
-        {
-        }
-    }
+    private void RunOnUi(Action action) => UiDispatch.Run(action, _window?.Dispatcher);
 }

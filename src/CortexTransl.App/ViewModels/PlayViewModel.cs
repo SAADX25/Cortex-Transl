@@ -8,7 +8,6 @@ using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
 using System.Diagnostics;
 using System.Collections.ObjectModel;
-using System.Text.Json;
 using CortexTransl.App.Services.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -69,7 +68,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     private void ExportPerformance()
     {
-        var path = Path.Combine(AppDataPaths.CreateDefault().DataDirectory, "logs", "subtitle-performance.json");
+        var path = Path.Combine(AppDataPaths.Default.DataDirectory, "logs", "subtitle-performance.json");
         _pipeline.Diagnostics.Export(path);
         StatusMessage = $"Latency report saved to {path}. Timing and resource numbers only.";
     }
@@ -82,14 +81,17 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     public int TextStabilityMilliseconds { get => _storySettings.StabilityMilliseconds; set { _storySettings.StabilityMilliseconds = Math.Clamp(value, 100, 2000); UpdateStorySettings(); } }
     public string TerminologyText
     {
-        get => string.Join(Environment.NewLine, _storySettings.Terminology.Select(x => $"{x.Key} = {x.Value}"));
+        get => FormatTerms(_storySettings.Terminology);
         set { if (TryParseTerms(value, out var terms)) { _storySettings.Terminology = terms; UpdateStorySettings(); } }
     }
     public string SpeakerNamesText
     {
-        get => string.Join(Environment.NewLine, _storySettings.SpeakerNames.Select(x => $"{x.Key} = {x.Value}"));
+        get => FormatTerms(_storySettings.SpeakerNames);
         set { if (TryParseTerms(value, out var terms)) { _storySettings.SpeakerNames = terms; UpdateStorySettings(); } }
     }
+
+    private static string FormatTerms(IReadOnlyDictionary<string, string> terms) =>
+        string.Join(Environment.NewLine, terms.Select(x => $"{x.Key} = {x.Value}"));
 
     private bool TryParseTerms(string text, out Dictionary<string, string> terms)
     {
@@ -112,7 +114,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     private void LoadStorySettings(StorySettings? settings)
     {
-        _storySettings = JsonSerializer.Deserialize<StorySettings>(JsonSerializer.Serialize(settings ?? new())) ?? new();
+        _storySettings = (settings ?? new()).Clone();
         foreach (var property in new[] { nameof(FastSubtitles), nameof(PerformanceDiagnosticsEnabled), nameof(SpeakerIdentity), nameof(SceneState), nameof(DeepLGlossaryId), nameof(TerminologyText),
             nameof(SpeakerNamesText), nameof(SubtitleGraceMilliseconds), nameof(SubtitleMaximumMilliseconds), nameof(TextStabilityMilliseconds) })
             OnPropertyChanged(property);
@@ -418,7 +420,8 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         get => _overlayPlacement;
         set
         {
-            if (SetProperty(ref _overlayPlacement, value))
+            var normalized = OverlaySettings.NormalizePlacement(value);
+            if (SetProperty(ref _overlayPlacement, normalized))
             {
                 _ = SaveSettingsAsync();
                 RefreshOverlay();
@@ -431,7 +434,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         get => _translationMode;
         set
         {
-            var normalized = NormalizeTranslationMode(value);
+            var normalized = OverlaySettings.NormalizeMode(value);
             if (SetProperty(ref _translationMode, normalized))
             {
                 _pipeline.Reset();
@@ -469,7 +472,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         get => _overlayTextSize;
         set
         {
-            var normalized = NormalizeOverlayTextSize(value);
+            var normalized = OverlayTextSizes.Normalize(value);
             if (SetProperty(ref _overlayTextSize, normalized))
             {
                 OnPropertyChanged(nameof(OverlayFontScale));
@@ -481,24 +484,11 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
     }
 
-    public double OverlayFontScale => OverlayTextSize switch
-    {
-        "small" => 0.78,
-        "large" => 1.24,
-        "xlarge" => 1.52,
-        _ => 1.0
-    };
+    public double OverlayFontScale => OverlayTextSizes.FontScale(OverlayTextSize);
 
-    public double OverlayPreviewFontSize => OverlayTextSize switch
-    {
-        "small" => 15,
-        "large" => 23,
-        "xlarge" => 28,
-        _ => 19
-    };
+    public double OverlayPreviewFontSize => OverlayTextSizes.PreviewFontSize(OverlayTextSize);
 
-    public string OverlayTextSizeLabel => OverlayTextSizeOptions
-        .FirstOrDefault(item => item.Id == OverlayTextSize)?.Name ?? "Medium";
+    public string OverlayTextSizeLabel => OverlayTextSizes.Label(OverlayTextSize);
 
     public string OverlayTextColor
     {
@@ -705,14 +695,14 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         var settings = await _appSettingsService.LoadAsync(cancellationToken);
         _themeService.ApplyTheme(string.IsNullOrWhiteSpace(settings.Theme) ? "Dark" : settings.Theme);
         _sourceLanguage = string.IsNullOrWhiteSpace(settings.SourceLanguage) ? "en" : settings.SourceLanguage;
-        _overlayPlacement = NormalizeOverlayPlacement(settings.OverlayPlacement);
+        _overlayPlacement = OverlaySettings.NormalizePlacement(settings.OverlayPlacement);
         if (_overlayPlacement == "below")
         {
             _overlayPlacement = "cover";
         }
-        _translationMode = NormalizeTranslationMode(settings.TranslationMode);
+        _translationMode = OverlaySettings.NormalizeMode(settings.TranslationMode);
         _overlayBackgroundOpacity = settings.OverlayBackgroundOpacity <= 0 ? 0.88 : settings.OverlayBackgroundOpacity;
-        _overlayTextSize = NormalizeOverlayTextSize(settings.OverlayTextSize);
+        _overlayTextSize = OverlayTextSizes.Normalize(settings.OverlayTextSize);
         _overlayTextColor = OverlayTextColors.Normalize(settings.OverlayTextColor);
         _minimizeDuringPlay = settings.MinimizeDuringPlay;
         _useDeepLFreeApi = settings.UseDeepLFreeApi;
@@ -736,42 +726,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             _selectedRegion = new CaptureRegion(settings.RegionX, settings.RegionY, settings.RegionWidth, settings.RegionHeight);
         }
 
-        OnPropertyChanged(nameof(SourceLanguage));
-        OnPropertyChanged(nameof(SourceLanguageOptions));
-        OnPropertyChanged(nameof(SourceLanguageHint));
-        OnPropertyChanged(nameof(OverlayPlacement));
-        OnPropertyChanged(nameof(TranslationMode));
-        OnPropertyChanged(nameof(IsListMode));
-        OnPropertyChanged(nameof(IsDialogueMode));
-        OnPropertyChanged(nameof(RegionHint));
-        OnPropertyChanged(nameof(RegionSectionTitle));
-        OnPropertyChanged(nameof(SelectRegionButtonLabel));
-        OnPropertyChanged(nameof(TranslationModeHint));
-        OnPropertyChanged(nameof(OverlayBackgroundOpacity));
-        OnPropertyChanged(nameof(OverlayOpacityPercent));
-        OnPropertyChanged(nameof(OverlayTextSize));
-        OnPropertyChanged(nameof(OverlayFontScale));
-        OnPropertyChanged(nameof(OverlayPreviewFontSize));
-        OnPropertyChanged(nameof(OverlayTextSizeLabel));
-        OnPropertyChanged(nameof(OverlayTextColor));
-        OnPropertyChanged(nameof(OverlayTextColorLabel));
-        OnPropertyChanged(nameof(MinimizeDuringPlay));
-        OnPropertyChanged(nameof(UseDeepLFreeApi));
-        OnPropertyChanged(nameof(TranslationEngine));
-        OnPropertyChanged(nameof(IsOfflineEngine));
-        OnPropertyChanged(nameof(IsDeepLEngine));
-        OnPropertyChanged(nameof(IsOfflineReady));
-        OnPropertyChanged(nameof(CanTranslate));
-        OnPropertyChanged(nameof(ProfileName));
-        OnPropertyChanged(nameof(DeepLApiKey));
-        OnPropertyChanged(nameof(HasApiKey));
-        OnPropertyChanged(nameof(ApiKeyStatusText));
-        OnPropertyChanged(nameof(SelectedRegion));
-        OnPropertyChanged(nameof(SelectedRegionDisplay));
-        OnPropertyChanged(nameof(HasRegion));
-        OnPropertyChanged(nameof(HasProfiles));
-        OnPropertyChanged(nameof(HasNoProfiles));
-        OnPropertyChanged(nameof(SessionBadgeText));
+        OnPropertyChanged(string.Empty);
         SaveProfileCommand.RaiseCanExecuteChanged();
         TogglePlayCommand.RaiseCanExecuteChanged();
 
@@ -1100,28 +1055,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
         StatusMessage = result.Status;
     }
-    private static void RunOnUi(Action action)
-    {
-        try
-        {
-            var dispatcher = Application.Current?.Dispatcher;
-            if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
-            {
-                return;
-            }
-
-            if (dispatcher.CheckAccess())
-            {
-                action();
-                return;
-            }
-
-            dispatcher.Invoke(action, DispatcherPriority.Send, CancellationToken.None, TimeSpan.FromMilliseconds(400));
-        }
-        catch
-        {
-        }
-    }
+    private static void RunOnUi(Action action) => UiDispatch.Run(action);
 
     private OverlaySettings CreateOverlaySettings()
     {
@@ -1242,7 +1176,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             OverlayTextColor = OverlayTextColor,
             OcrEngine = "windows",
             TranslationProvider = IsOfflineEngine ? "offline" : "deepl",
-            Story = JsonSerializer.Deserialize<StorySettings>(JsonSerializer.Serialize(_storySettings)) ?? new()
+            Story = _storySettings.Clone()
         };
     }
 
@@ -1258,10 +1192,10 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         {
             _sourceLanguage = "en";
         }
-        _translationMode = NormalizeTranslationMode(profile.TranslationMode);
-        _overlayPlacement = NormalizeOverlayPlacement(profile.OverlayPlacement);
+        _translationMode = OverlaySettings.NormalizeMode(profile.TranslationMode);
+        _overlayPlacement = OverlaySettings.NormalizePlacement(profile.OverlayPlacement);
         _overlayBackgroundOpacity = profile.OverlayBackgroundOpacity <= 0 ? 0.88 : Math.Clamp(profile.OverlayBackgroundOpacity, 0.6, 0.95);
-        _overlayTextSize = NormalizeOverlayTextSize(profile.OverlayTextSize);
+        _overlayTextSize = OverlayTextSizes.Normalize(profile.OverlayTextSize);
         _overlayTextColor = OverlayTextColors.Normalize(profile.OverlayTextColor);
         _profileName = profile.Name;
         LoadStorySettings(profile.Story);
@@ -1269,34 +1203,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         _pipeline.BindCapture(SelectedRegion, IsListMode);
         _lastBlocks = [];
 
-        OnPropertyChanged(nameof(SelectedRegion));
-        OnPropertyChanged(nameof(SelectedRegionDisplay));
-        OnPropertyChanged(nameof(HasRegion));
-        OnPropertyChanged(nameof(SessionBadgeText));
-        OnPropertyChanged(nameof(TranslationEngine));
-        OnPropertyChanged(nameof(IsOfflineEngine));
-        OnPropertyChanged(nameof(IsDeepLEngine));
-        OnPropertyChanged(nameof(SourceLanguageOptions));
-        OnPropertyChanged(nameof(SourceLanguageHint));
-        OnPropertyChanged(nameof(CanTranslate));
-        OnPropertyChanged(nameof(SourceLanguage));
-        OnPropertyChanged(nameof(TranslationMode));
-        OnPropertyChanged(nameof(IsListMode));
-        OnPropertyChanged(nameof(IsDialogueMode));
-        OnPropertyChanged(nameof(RegionHint));
-        OnPropertyChanged(nameof(RegionSectionTitle));
-        OnPropertyChanged(nameof(SelectRegionButtonLabel));
-        OnPropertyChanged(nameof(TranslationModeHint));
-        OnPropertyChanged(nameof(OverlayPlacement));
-        OnPropertyChanged(nameof(OverlayBackgroundOpacity));
-        OnPropertyChanged(nameof(OverlayOpacityPercent));
-        OnPropertyChanged(nameof(OverlayTextSize));
-        OnPropertyChanged(nameof(OverlayFontScale));
-        OnPropertyChanged(nameof(OverlayPreviewFontSize));
-        OnPropertyChanged(nameof(OverlayTextSizeLabel));
-        OnPropertyChanged(nameof(OverlayTextColor));
-        OnPropertyChanged(nameof(OverlayTextColorLabel));
-        OnPropertyChanged(nameof(ProfileName));
+        OnPropertyChanged(string.Empty);
         SaveProfileCommand.RaiseCanExecuteChanged();
         TogglePlayCommand.RaiseCanExecuteChanged();
         DownloadOfflineModelCommand.RaiseCanExecuteChanged();
@@ -1355,36 +1262,10 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             RegionHeight = _selectedRegion.Height,
             ProfileName = _profileName,
             TranslationMode = _translationMode,
-            Story = JsonSerializer.Deserialize<StorySettings>(JsonSerializer.Serialize(_storySettings)) ?? new()
+            Story = _storySettings.Clone()
         };
 
         await _appSettingsService.SaveAsync(settings);
-    }
-
-    private static string NormalizeOverlayPlacement(string? placement)
-    {
-        return placement?.Trim().ToLowerInvariant() switch
-        {
-            "below" => "below",
-            "above" => "above",
-            _ => "cover"
-        };
-    }
-
-    private static string NormalizeOverlayTextSize(string? size)
-    {
-        return size?.Trim().ToLowerInvariant() switch
-        {
-            "small" => "small",
-            "large" => "large",
-            "xlarge" => "xlarge",
-            _ => "medium"
-        };
-    }
-
-    private static string NormalizeTranslationMode(string? mode)
-    {
-        return mode?.Trim().ToLowerInvariant() == "list" ? "list" : "dialogue";
     }
 
     private void RaiseNavProperties()

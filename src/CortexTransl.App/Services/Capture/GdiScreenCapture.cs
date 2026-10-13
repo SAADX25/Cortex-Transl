@@ -114,12 +114,4 @@ internal static class GdiScreenCapture
     [DllImport("user32.dll")]
     private static extern bool PrintWindow(nint hwnd, nint hdcBlt, uint flags);
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativeRect
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
 }

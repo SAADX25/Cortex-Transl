@@ -19,4 +19,22 @@ public sealed class StorySettings
     public int MaximumVisibilityMilliseconds { get; set; } = 15000;
     public int SceneResetMilliseconds { get; set; } = 4000;
     public int CaptureIntervalMilliseconds { get; set; } = 100;
+
+    public StorySettings Clone() => new()
+    {
+        FastSubtitles = FastSubtitles,
+        PerformanceDiagnostics = PerformanceDiagnostics,
+        Speaker = Speaker,
+        SceneState = SceneState,
+        Terminology = new(Terminology, StringComparer.OrdinalIgnoreCase),
+        SpeakerNames = new(SpeakerNames, StringComparer.OrdinalIgnoreCase),
+        DeepLGlossaryId = DeepLGlossaryId,
+        StabilityMilliseconds = StabilityMilliseconds,
+        CompletedStabilityMilliseconds = CompletedStabilityMilliseconds,
+        DisappearanceGraceMilliseconds = DisappearanceGraceMilliseconds,
+        OcrFailureGraceMilliseconds = OcrFailureGraceMilliseconds,
+        MaximumVisibilityMilliseconds = MaximumVisibilityMilliseconds,
+        SceneResetMilliseconds = SceneResetMilliseconds,
+        CaptureIntervalMilliseconds = CaptureIntervalMilliseconds
+    };
 }

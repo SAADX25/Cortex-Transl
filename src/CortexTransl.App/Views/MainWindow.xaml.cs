@@ -29,7 +29,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        var paths = AppDataPaths.CreateDefault();
+        var paths = AppDataPaths.Default;
         var connectionFactory = new SqliteConnectionFactory(paths.DatabasePath);
         var translationSettings = new TranslationProviderSettings();
         var diagnostics = new PerformanceDiagnostics();

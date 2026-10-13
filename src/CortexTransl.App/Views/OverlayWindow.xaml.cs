@@ -2,7 +2,6 @@ using CortexTransl.App.Models;
 using CortexTransl.App.Services.Capture;
 using CortexTransl.App.Utils;
 using System.Globalization;
-using Bitmap = System.Drawing.Bitmap;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -26,7 +25,6 @@ public partial class OverlayWindow : Window
     private string _lastText = string.Empty;
     private CaptureRegion _lastPlacementRect = CaptureRegion.Empty;
     private CaptureRegion? _capturePlacementRegion;
-    private CaptureRegion? _capturePlacementBounds;
     private string _lastPlacement = string.Empty;
     private double _lastOpacity = -1;
     private double _lockedWidth;
@@ -254,7 +252,7 @@ public partial class OverlayWindow : Window
             ResetCapturePlacement();
         }
 
-        var target = _capturePlacementBounds ?? GetPlacementRect(region, placement);
+        var target = GetPlacementRect(region, placement);
         LockDipSize(target);
 
         var hwnd = new WindowInteropHelper(this).EnsureHandle();
@@ -426,93 +424,26 @@ public partial class OverlayWindow : Window
     internal void ResetCapturePlacement()
     {
         _capturePlacementRegion = null;
-        _capturePlacementBounds = null;
     }
 
     internal static void RestoreCapturePlacement(CaptureRegion region)
     {
-        var application = Application.Current;
-        var dispatcher = application?.Dispatcher;
-        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+        UiDispatch.Run(() =>
         {
-            return;
-        }
-
-        if (!dispatcher.CheckAccess())
-        {
-            dispatcher.Invoke(() => RestoreCapturePlacement(region));
-            return;
-        }
-
-        foreach (var overlay in application!.Windows.OfType<OverlayWindow>().Where(window => window.IsVisible))
-        {
-            if (overlay._capturePlacementRegion != region)
+            var application = Application.Current;
+            if (application is null) return;
+            foreach (var overlay in application.Windows.OfType<OverlayWindow>().Where(window => window.IsVisible))
             {
-                continue;
+                if (overlay._capturePlacementRegion != region)
+                {
+                    continue;
+                }
+
+                var placement = overlay._lastPlacement;
+                overlay.ResetCapturePlacement();
+                overlay.Place(region, placement);
             }
-
-            var placement = overlay._lastPlacement;
-            overlay.ResetCapturePlacement();
-            overlay.Place(region, placement);
-        }
-    }
-
-    private bool UncoverCaptureRegion(CaptureRegion region)
-    {
-        if (!CaptureSafePlacement.Overlaps(_lastPlacementRect, region))
-        {
-            return false;
-        }
-
-        if (_isListMode)
-        {
-            throw new CaptureUnavailableException("تعذّر التقاط أسماء القوائم مباشرة. أعد تحديد نافذة القائمة باستخدام F9.");
-        }
-
-        var target = CaptureSafePlacement.Find(region, _lastPlacementRect, ScreenCoordinates.GetMonitorWorkArea(region));
-        if (target is null)
-        {
-            throw new CaptureUnavailableException("Select a smaller text region so the translation can stay beside it.");
-        }
-
-        _capturePlacementRegion = region;
-        _capturePlacementBounds = target;
-        _lastPlacementRect = target;
-        LockDipSize(target);
-        ReapplyLockedPlacement();
-        return true;
-    }
-
-    // Keep the desktop fallback's OCR region uncovered without repeatedly
-    // hiding the translation. The alternate placement lasts for this session.
-    internal static Bitmap CaptureDesktopWithUncoveredRegion(CaptureRegion region, Func<Bitmap> capture)
-    {
-        var application = Application.Current;
-        var dispatcher = application?.Dispatcher;
-        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
-        {
-            return capture();
-        }
-
-        if (!dispatcher.CheckAccess())
-        {
-            return dispatcher.Invoke(() => CaptureDesktopWithUncoveredRegion(region, capture));
-        }
-
-        var overlays = application!.Windows.OfType<OverlayWindow>()
-            .Where(window => window.IsVisible).ToArray();
-        var moved = false;
-        foreach (var overlay in overlays)
-        {
-            moved |= overlay.UncoverCaptureRegion(region);
-        }
-
-        if (moved)
-        {
-            DwmFlush();
-        }
-
-        return capture();
+        });
     }
 
     private static nint GetWindowLongPtr(nint hwnd, int index)
@@ -551,6 +482,4 @@ public partial class OverlayWindow : Window
         int height,
         uint flags);
 
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmFlush();
 }

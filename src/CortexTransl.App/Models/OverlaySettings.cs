@@ -9,12 +9,17 @@ public sealed record OverlaySettings(
     double FontScale = 1.0,
     string TextColor = "white")
 {
-    public string NormalizedPlacement => Placement.ToLowerInvariant() switch
+    public static string NormalizePlacement(string? placement) => placement?.Trim().ToLowerInvariant() switch
     {
         "below" => "below",
         "above" => "above",
         _ => "cover"
     };
+
+    public static string NormalizeMode(string? mode) =>
+        string.Equals(mode?.Trim(), "list", StringComparison.OrdinalIgnoreCase) ? "list" : "dialogue";
+
+    public string NormalizedPlacement => NormalizePlacement(Placement);
 
     public bool IsListMode => Mode.Equals("list", StringComparison.OrdinalIgnoreCase);
 

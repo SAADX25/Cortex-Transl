@@ -134,12 +134,4 @@ internal sealed record CaptureWindowTarget(nint Handle, CaptureRegion Bounds, ni
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(nint window, int attribute, out int value, int size);
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativeRect
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
 }
