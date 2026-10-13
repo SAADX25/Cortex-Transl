@@ -20,12 +20,10 @@ public partial class OverlayWindow : Window
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoSize = 0x0001;
-    private const int PhysicalGap = 8;
+    private const uint WdaExcludeFromCapture = 0x00000011;
 
     private string _lastText = string.Empty;
     private CaptureRegion _lastPlacementRect = CaptureRegion.Empty;
-    private CaptureRegion? _capturePlacementRegion;
-    private string _lastPlacement = string.Empty;
     private double _lastOpacity = -1;
     private double _lockedWidth;
     private double _lockedHeight;
@@ -167,12 +165,13 @@ public partial class OverlayWindow : Window
 
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
-        SetWindowDisplayAffinity(new WindowInteropHelper(this).Handle, 0x00000011);
+        if (!SetWindowDisplayAffinity(new WindowInteropHelper(this).Handle, WdaExcludeFromCapture))
+            AppLog.Write("overlay-capture-affinity", $"Capture exclusion failed. Win32 error: {Marshal.GetLastWin32Error()}.");
         ApplyExtendedStyles();
         ReapplyLockedPlacement();
     }
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowDisplayAffinity(nint window, uint affinity);
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -247,19 +246,13 @@ public partial class OverlayWindow : Window
 
     private void Place(CaptureRegion region, string placement)
     {
-        if (_capturePlacementRegion != region || _lastPlacement != placement)
-        {
-            ResetCapturePlacement();
-        }
-
-        var target = GetPlacementRect(region, placement);
+        var target = OverlaySettings.CalculatePlacement(region, placement, ScreenCoordinates.GetVirtualScreenPhysical());
         LockDipSize(target);
 
         var hwnd = new WindowInteropHelper(this).EnsureHandle();
         SetWindowPos(hwnd, HwndTopmost, target.X, target.Y, target.Width, target.Height, SwpNoActivate);
 
         _lastPlacementRect = target;
-        _lastPlacement = placement;
         ApplyFontSize();
     }
 
@@ -367,41 +360,6 @@ public partial class OverlayWindow : Window
         Top = dipTop;
     }
 
-    private static CaptureRegion GetPlacementRect(CaptureRegion region, string placement)
-    {
-        var width = Math.Max(80, region.Width);
-        var height = Math.Max(48, region.Height);
-        var left = region.X;
-        var top = region.Y;
-
-        if (placement == "below")
-        {
-            top = region.Y + region.Height + PhysicalGap;
-        }
-        else if (placement == "above")
-        {
-            top = region.Y - height - PhysicalGap;
-        }
-
-        var screen = ScreenCoordinates.GetVirtualScreenPhysical();
-        if (top < screen.Y || top + height > screen.Y + screen.Height)
-        {
-            top = region.Y;
-        }
-
-        if (left < screen.X)
-        {
-            left = screen.X;
-        }
-
-        if (left + width > screen.X + screen.Width)
-        {
-            left = Math.Max(screen.X, screen.X + screen.Width - width);
-        }
-
-        return new CaptureRegion(left, top, width, height);
-    }
-
     private void ApplyExtendedStyles()
     {
         if (_stylesApplied)
@@ -419,31 +377,6 @@ public partial class OverlayWindow : Window
         extendedStyle = (nint)((long)extendedStyle | WsExToolWindow | WsExNoActivate | WsExTransparent);
         SetWindowLongPtr(handle, GwlExStyle, extendedStyle);
         _stylesApplied = true;
-    }
-
-    internal void ResetCapturePlacement()
-    {
-        _capturePlacementRegion = null;
-    }
-
-    internal static void RestoreCapturePlacement(CaptureRegion region)
-    {
-        UiDispatch.Run(() =>
-        {
-            var application = Application.Current;
-            if (application is null) return;
-            foreach (var overlay in application.Windows.OfType<OverlayWindow>().Where(window => window.IsVisible))
-            {
-                if (overlay._capturePlacementRegion != region)
-                {
-                    continue;
-                }
-
-                var placement = overlay._lastPlacement;
-                overlay.ResetCapturePlacement();
-                overlay.Place(region, placement);
-            }
-        });
     }
 
     private static nint GetWindowLongPtr(nint hwnd, int index)

@@ -1,5 +1,4 @@
 using CortexTransl.App.Models;
-using CortexTransl.App.Views;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -23,7 +22,6 @@ internal static class GdiScreenCapture
         var printed = TryPrintWindow(region, source?.DesktopView ?? nint.Zero);
         if (printed is not null && !LooksBlank(printed))
         {
-            OverlayWindow.RestoreCapturePlacement(region);
             return printed;
         }
 
@@ -31,7 +29,6 @@ internal static class GdiScreenCapture
         printed = TryPrintWindow(region, source?.Handle ?? nint.Zero);
         if (printed is not null && !LooksBlank(printed))
         {
-            OverlayWindow.RestoreCapturePlacement(region);
             return printed;
         }
 

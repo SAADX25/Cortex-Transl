@@ -36,7 +36,7 @@
 ## 🚀 Quick Start
 
 ```
-1. Launch the app — the Arabic model downloads once (~30 MB)
+1. Launch the app — use Download once if Arabic files were not bundled
 2. Run your game in Borderless Windowed mode
 3. Press F9 and drag around the dialogue box
 4. Press F8 or click Start to begin translating
@@ -46,7 +46,9 @@ For offline translation, choose the game's language explicitly. DeepL can detect
 
 Offline English menus use Arabic UI terminology for common game commands and desktop labels, and preserve known product names such as Steam and Brave. Known captions wrapped across two or three lines are translated as one label. Unknown labels still use the offline translation model; this does not guarantee accurate terminology for every game. Menu results use a separate cache version so earlier literal translations are not reused.
 
-The translation overlay is recordable, including by NVIDIA recording. Text is captured from the underlying window without Windows capture-protection flags. Desktop icons also support direct capture from Explorer's icon view, keeping translated labels over the original names. Menu mode never moves labels away from their source: if direct capture is unavailable, it retains the last translation and reports a capture error. Dialogue mode can use a desktop fallback that places the translation beside the selected region without repeatedly hiding it. Direct capture restores the original placement when it becomes available again.
+Story capture stays bound to the selected window. It never falls back to desktop pixels. Menu mode can capture a selected Explorer icon view directly with `PrintWindow` when WGC is unavailable; it also never reads arbitrary desktop pixels. Loss of the selected source clears the translation. Stopping translation releases its WGC session while retaining the selected target for restart.
+
+The overlay requests Windows capture exclusion (`WDA_EXCLUDEFROMCAPTURE`), so Arabic text can be absent from recordings. Cortex has no NVIDIA-specific compatibility feature, and recording coexistence is not certified. See [the recording investigation and test matrix](docs/CODEBASE_CLEANUP.md#nvidia-recording-investigation) for verified findings, reproduction steps, and outstanding hardware tests.
 
 ### ⌨️ Keyboard Shortcuts
 
@@ -141,7 +143,8 @@ Cortex Transl/
 │       │   └── ObservableObject.cs          # INotifyPropertyChanged base
 │       │
 │       ├── 📁 ViewModels/
-│       │   └── PlayViewModel.cs             # Main ViewModel (MVVM)
+│       │   ├── PlayViewModel.cs             # Settings, presets, navigation (MVVM)
+│       │   └── PlayViewModel.Playback.cs    # Playback and overlay publication
 │       │
 │       └── 📁 Views/                    # WPF XAML views
 │           ├── MainWindow.xaml              # Main application window
@@ -232,6 +235,19 @@ dotnet publish src/CortexTransl.App/CortexTransl.App.csproj -c Release -p:Publis
 
 > ⚠️ **Note:** Do not use Single File publish — `bergamot.dll` must remain alongside the executable.
 
+### Validate changes
+
+```powershell
+dotnet build CortexTransl.sln -c Release -warnaserror
+dotnet test CortexTransl.sln -c Release --no-build --logger trx
+dotnet run --project tools/CaptureChecks -c Release --no-build
+```
+
+Real Windows capture benchmarks require a signed-in desktop and installed models.
+Enable them with `CORTEX_TRANSL_RUN_WINDOWS_BENCHMARK=1`; see
+[the benchmark instructions](tests/CortexTransl.Tests/Benchmarks/README.md).
+Skipped native or interactive tests are unavailable verification, not passes.
+
 ---
 
 ## 📦 NuGet Dependencies
@@ -239,7 +255,7 @@ dotnet publish src/CortexTransl.App/CortexTransl.App.csproj -c Release -p:Publis
 | Package | Version | Purpose |
 |---------|---------|---------|
 | [`BergamotTranslatorSharp`](https://github.com/mozilla/bergamot-translator) | 0.5.1 | Offline translation engine |
-| [`Microsoft.Data.Sqlite`](https://docs.microsoft.com/en-us/dotnet/standard/data/sqlite/) | 10.0.9 | Cache & settings storage |
+| [`Microsoft.Data.Sqlite`](https://docs.microsoft.com/en-us/dotnet/standard/data/sqlite/) | 10.0.9 | Cache & presets storage |
 | [`SQLitePCLRaw.bundle_e_sqlite3`](https://github.com/ericsink/SQLitePCL.raw) | 3.0.3 | Native SQLite provider |
 | [`Vortice.Direct3D11`](https://github.com/amerkoleci/Vortice.Windows) | 3.8.3 | Windows Graphics Capture API |
 
@@ -255,8 +271,11 @@ The app stores its data at:
 │   ├── model.enar.intgemm.alphas.bin
 │   ├── lex.50.50.enar.s2t.bin
 │   └── vocab.enar.spm
-├── cortex.db                        # Cache + settings + presets database
-└── app.log                          # Application log
+├── cortex-transl.db                 # Cache + presets database
+├── appsettings.json                 # Settings and encrypted DeepL API key
+└── logs\
+    ├── errors.log                   # Application error log
+    └── subtitle-performance.json    # Optional bounded numeric diagnostics
 ```
 
 ---
@@ -272,3 +291,7 @@ Built with ❤️ for Arabic gamers — **Cortex Transl v1.6.0**
 See [the reliability upgrade report](docs/STORY_TRANSLATION_RELIABILITY.md) for story context and terminology setup, subtitle timing, window-bound capture behavior, automated test evidence, measured performance, and real-game verification limits.
 
 See [the offline subtitle latency report](docs/OFFLINE_SUBTITLE_LATENCY.md) for the optional Fast Subtitles profile, controlled Windows measurements against Update-17, per-stage P50/P95, resource usage, reproduction commands, and remaining Arabic quality and real-game limitations.
+
+See [the Update-19 cleanup report](docs/CODEBASE_CLEANUP.md) for removal evidence,
+refactoring, regression results, packaging checks, before/after measurements,
+and the NVIDIA recording investigation.

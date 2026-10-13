@@ -23,8 +23,11 @@ public static class UiDispatch
 
             dispatcher.Invoke(action, DispatcherPriority.Send, CancellationToken.None, TimeSpan.FromMilliseconds(400));
         }
-        catch
+        catch (OperationCanceledException) { } // Dispatcher shutdown cancels queued work.
+        catch (TimeoutException ex)
         {
+            AppLog.Write("ui-dispatch-timeout", ex);
         }
+        catch (Exception ex) { AppLog.Write("ui-dispatch", ex); }
     }
 }

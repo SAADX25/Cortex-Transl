@@ -21,19 +21,15 @@ public static class OcrImagePreprocessor
         using var cropped = crop.Width == source.Width && crop.Height == source.Height ? null : source.Clone(crop, PixelFormat.Format32bppArgb);
         var scaled = ScaleForOcr(cropped ?? source, options, crop.X, crop.Y);
 
-        if (options.Grayscale || options.ContrastFactor != 1.0 || options.Threshold || options.Invert)
+        try
         {
-            EnhanceForOcr(scaled.Bitmap, options);
+            if (options.Grayscale || options.ContrastFactor != 1.0 || options.Threshold || options.Invert)
+                EnhanceForOcr(scaled.Bitmap, options);
+            if (options.Sharpen) Sharpen(scaled.Bitmap);
+            if (preset == "caption-strokes") SuppressFullHeightBrightBars(scaled.Bitmap);
+            return scaled;
         }
-
-        if (options.Sharpen)
-        {
-            Sharpen(scaled.Bitmap);
-        }
-
-        if (preset == "caption-strokes") SuppressFullHeightBrightBars(scaled.Bitmap);
-
-        return scaled;
+        catch { scaled.Dispose(); throw; }
     }
 
     private static unsafe void SuppressFullHeightBrightBars(Bitmap bitmap)
@@ -69,8 +65,9 @@ public static class OcrImagePreprocessor
         for (var index = 0; index < 32; index++)
         {
             var x = index * (source.Width - 1) / 31;
-            foreach (var y in new[] { 0, source.Height - 1 })
+            for (var edge = 0; edge < 2; edge++)
             {
+                var y = edge == 0 ? 0 : source.Height - 1;
                 var pixel = source.GetPixel(x, y);
                 if (Math.Abs(pixel.R - background.R) + Math.Abs(pixel.G - background.G) + Math.Abs(pixel.B - background.B) > 48) return full;
             }
@@ -177,7 +174,7 @@ public static class OcrImagePreprocessor
         if (width == source.Width && height == source.Height) graphics.DrawImageUnscaled(source, 0, 0);
         else graphics.DrawImage(source, 0, 0, width, height);
 
-        return new OcrPreprocessedImage(result, scale, options.Name, offsetX, offsetY);
+        return new OcrPreprocessedImage(result, scale, offsetX, offsetY);
     }
 
     private static unsafe void EnhanceForOcr(Bitmap bitmap, OcrPreprocessingOptions options)
@@ -342,11 +339,10 @@ public static class OcrImagePreprocessor
 
 public sealed class OcrPreprocessedImage : IDisposable
 {
-    public OcrPreprocessedImage(Bitmap bitmap, double scale, string presetName, int offsetX = 0, int offsetY = 0)
+    public OcrPreprocessedImage(Bitmap bitmap, double scale, int offsetX = 0, int offsetY = 0)
     {
         Bitmap = bitmap;
         Scale = scale;
-        PresetName = presetName;
         OffsetX = offsetX;
         OffsetY = offsetY;
     }
@@ -355,7 +351,6 @@ public sealed class OcrPreprocessedImage : IDisposable
 
     public double Scale { get; }
 
-    public string PresetName { get; }
     public int OffsetX { get; }
     public int OffsetY { get; }
 

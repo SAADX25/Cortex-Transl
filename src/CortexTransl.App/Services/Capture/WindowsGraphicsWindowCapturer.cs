@@ -1,5 +1,6 @@
 using CortexTransl.App.Models;
 using CortexTransl.App.Services.Diagnostics;
+using CortexTransl.App.Utils;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -7,7 +8,6 @@ using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
 using Vortice.Mathematics;
-using Windows.Foundation.Metadata;
 using Windows.Graphics;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
@@ -35,7 +35,7 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
     private int _stagingWidth, _stagingHeight;
     private Bitmap? _cachedCrop;
     private Rectangle? _cachedLocation;
-    private Exception? _captureError;
+    private volatile Exception? _captureError;
     private volatile bool _disposed;
     public long ReadbackCount { get; private set; }
     public long ReadbackBytes { get; private set; }
@@ -49,18 +49,8 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
         _item = item; _frameSize = item.Size; _framePool = framePool; _session = session;
         _diagnostics = diagnostics ?? new();
         _framePool.FrameArrived += OnFrameArrived;
-        _session.StartCapture();
     }
     public nint Window => _window;
-    private static void HideYellowCaptureBorder(GraphicsCaptureSession session)
-    {
-        try
-        {
-            if (ApiInformation.IsPropertyPresent("Windows.Graphics.Capture.GraphicsCaptureSession", "IsBorderRequired"))
-                session.IsBorderRequired = false;
-        }
-        catch { } // Borderless access may be unavailable; no synchronous UI wait.
-    }
     public static WindowsGraphicsWindowCapturer? TryCreate(nint window, PerformanceDiagnostics? diagnostics = null)
     {
         if (window == nint.Zero || !GraphicsCaptureSession.IsSupported())
@@ -74,6 +64,7 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
         GraphicsCaptureItem? item = null;
         Direct3D11CaptureFramePool? framePool = null;
         GraphicsCaptureSession? session = null;
+        WindowsGraphicsWindowCapturer? capturer = null;
 
         try
         {
@@ -108,9 +99,9 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
                 item.Size);
             session = framePool.CreateCaptureSession(item);
             session.IsCursorCaptureEnabled = false;
-            HideYellowCaptureBorder(session);
-
-            return new WindowsGraphicsWindowCapturer(
+            // Keep Windows' capture indicator. Border removal requires explicit
+            // consent and a package capability this unpackaged app does not have.
+            capturer = new WindowsGraphicsWindowCapturer(
                 window,
                 device,
                 context,
@@ -118,14 +109,22 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
                 item,
                 framePool,
                 session, diagnostics);
+            session.StartCapture();
+            return capturer;
         }
-        catch
+        catch (Exception ex)
         {
-            session?.Dispose();
-            framePool?.Dispose();
-            winRtDevice?.Dispose();
-            context?.Dispose();
-            device?.Dispose();
+            AppLog.Write("graphics-capture-create", ex);
+            if (capturer is not null)
+            {
+                capturer.Dispose();
+                return null;
+            }
+            ResourceCleanup.Dispose(session, "capture-session-dispose");
+            ResourceCleanup.Dispose(framePool, "capture-pool-dispose");
+            ResourceCleanup.Dispose(winRtDevice, "capture-winrt-dispose");
+            ResourceCleanup.Dispose(context, "capture-context-dispose");
+            ResourceCleanup.Dispose(device, "capture-device-dispose");
             return null;
         }
     }
@@ -139,7 +138,9 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
         {
             lock (_gate)
             {
-                if (_disposed || _captureError is not null) return null;
+                if (_disposed) return null;
+                if (_captureError is not null)
+                    throw new InvalidOperationException("Window capture failed. Recreate the selected window session.", _captureError);
                 var requested = CaptureCrop.Calculate(region, windowBounds, _frameSize.Width, _frameSize.Height);
                 // A static window need not emit frames. Revalidate its existing
                 // region without doing another GPU copy or losing dialogue.
@@ -266,14 +267,16 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
             if (_disposed) return;
             _disposed = true;
             _framePool.FrameArrived -= OnFrameArrived;
-            _session.Dispose();
-            _framePool.Dispose();
-            Interlocked.Exchange(ref _latestFrame, null)?.Dispose();
-            _staging?.Dispose(); _staging = null;
-            _cachedCrop?.Dispose(); _cachedCrop = null;
-            _winRtDevice.Dispose(); _context.Dispose(); _device.Dispose();
+            ResourceCleanup.Dispose(_session, "capture-session-dispose");
+            ResourceCleanup.Dispose(_framePool, "capture-pool-dispose");
+            ResourceCleanup.Dispose(Interlocked.Exchange(ref _latestFrame, null), "capture-frame-dispose");
+            ResourceCleanup.Dispose(_staging, "capture-staging-dispose"); _staging = null;
+            ResourceCleanup.Dispose(_cachedCrop, "capture-crop-dispose"); _cachedCrop = null;
+            ResourceCleanup.Dispose(_winRtDevice, "capture-winrt-dispose");
+            ResourceCleanup.Dispose(_context, "capture-context-dispose");
+            ResourceCleanup.Dispose(_device, "capture-device-dispose");
         }
         try { _frameReady.Set(); } catch (ObjectDisposedException) { }
-        _frameReady.Dispose();
+        ResourceCleanup.Dispose(_frameReady, "capture-event-dispose");
     }
 }

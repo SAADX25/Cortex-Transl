@@ -1,5 +1,7 @@
 #define MyAppName "Cortex Transl"
-#define MyAppVersion "1.6.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "1.6.0"
+#endif
 #define MyAppPublisher "Cortex Transl"
 #define MyAppExeName "CortexTransl.App.exe"
 
@@ -14,7 +16,7 @@ DefaultDirName={localappdata}\Programs\Cortex Transl
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename=CortexTransl-1.6.0-Setup
+OutputBaseFilename=CortexTransl-{#MyAppVersion}-Setup
 SetupIconFile=..\src\CortexTransl.App\CortexTransl.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
@@ -28,7 +30,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 CloseApplications=yes
 RestartApplications=no
 UsePreviousAppDir=yes
-VersionInfoVersion=1.6.0.0
+VersionInfoVersion={#MyAppVersion}.0
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 

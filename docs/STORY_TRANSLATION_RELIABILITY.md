@@ -2,6 +2,9 @@
 
 Implemented and verified locally on Windows on 2026-10-13. The application remains C# / .NET 10 / WPF, uses window capture rather than game injection, and retains Bergamot and DeepL routing.
 
+This report retains the original reliability measurements. For subsequent cleanup,
+current verification, and NVIDIA recording limits, see [the cleanup report](CODEBASE_CLEANUP.md).
+
 ## Behavior and configuration
 
 - F9 binds the chosen region to its source window. Story capture stays on that HWND and process; it does not enumerate a replacement window every frame. A minimized, closed, cloaked, moved-out-of-region, or unavailable source clears the overlay. Story mode never falls back to desktop pixels. After moving/restarting a game, select its dialogue again with F9.
@@ -9,7 +12,7 @@ Implemented and verified locally on Windows on 2026-10-13. The application remai
 - A serialized capture/OCR stage feeds one translation worker through a bounded channel with one pending item. New dialogue cancels the preceding request and replaces obsolete pending work. Work contains a sequence ID, immutable story-context snapshot, cache namespace, and cancellation token. Sequence/token checks precede publication, and WPF checks the sequence again before displaying a result.
 - A source change clears the preceding Arabic subtitle while the new line settles or translates. Blank OCR gets a short grace period; OCR exceptions get a separate bounded grace period. Blank/failed OCR never becomes a successful frame fingerprint. Exact successful frames still get periodic OCR revalidation.
 - Short complete lines, including `Run!`, `No!`, and `Help!`, are eligible immediately, irrespective of the preceding line's length. Longer complete lines confirm briefly. Unpunctuated/typewriter text waits for a quiet period. Exact equality is required to call dialogue unchanged; edits to negation, pronouns, words, or punctuation are not discarded as one-character noise.
-- Original pixels are the first dialogue OCR pass. Empty recognition can trigger a reduced-size pass and then adaptive grayscale/polarity/enlargement with a crop only when the border is demonstrably uniform. At most three OCR passes run for a frame. Recovery is throttled on repeated failed images, while changed images can recover immediately. Crop offsets and scale are mapped back to source coordinates. Menu preprocessing retains its existing small-text first pass.
+- Original pixels are the first dialogue OCR pass. Empty recognition can trigger a reduced-size pass, adaptive grayscale/polarity/enlargement with a crop only when the border is demonstrably uniform, and bright-stroke recovery for outlined captions. At most four OCR passes run for a frame. Recovery is throttled on repeated failed images, while changed images can recover immediately. Crop offsets and scale are mapped back to source coordinates. Menu preprocessing retains its existing small-text first pass.
 
 Save a named game preset, then open **Presets → Story context and subtitle timing**. Optional fields include the known current speaker, scene facts, game terms, Arabic character-name spellings, and an existing DeepL API glossary ID. Use one `English = Arabic` entry per line. Leave unknown speaker/scene facts blank; the application does not infer or manufacture identities.
 
@@ -21,8 +24,8 @@ Save a named game preset, then open **Presets → Story context and subtitle tim
 | OCR exception grace | 1,500 ms | Temporary recognition failures |
 | Maximum visibility | 15,000 ms | Prevents an unchanged line/frame from persisting indefinitely |
 | Scene-history reset gap | 4,000 ms | Clears observed history after a text-free interval |
-| Capture-loop delay | 100 ms | Delay between detection turns, in addition to capture/OCR work |
-| Successful-frame OCR recheck | 400 ms | Hard-coded bound on fingerprint reuse |
+| Capture-loop cadence | 100 ms normal / 80 ms fast | Target interval includes capture/OCR work; minimum remaining delay is 5 ms |
+| Successful-frame OCR recheck | 200 ms normal / 160 ms fast / 400 ms menus | Bound on reuse; independent observations still confirm candidate text |
 
 Visibility maximum, disappearance grace, and unpunctuated stability are editable in the preset panel. All story settings persist in `appsettings.json` and each preset's `StorySettingsJson`. Additional timing values can be configured in that serialized `Story` object. Values used by the tracker/loop are clamped to supported ranges.
 

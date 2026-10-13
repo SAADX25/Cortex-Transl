@@ -11,13 +11,9 @@
     <SolidColorBrush x:Key="AccentPressedBrush" Color="#2563EB" />
     <SolidColorBrush x:Key="DangerBrush" Color="#EF4444" />
     <SolidColorBrush x:Key="DangerHoverBrush" Color="#F87171" />
-    <SolidColorBrush x:Key="DangerPressedBrush" Color="#DC2626" />
     <SolidColorBrush x:Key="InputBackgroundBrush" Color="#0F172A" />
     <SolidColorBrush x:Key="InputBorderBrush" Color="#334155" />
     <SolidColorBrush x:Key="InputForegroundBrush" Color="#E5E7EB" />
-    <SolidColorBrush x:Key="TranslationPanelBackgroundBrush" Color="#0F172A" />
-    <SolidColorBrush x:Key="StatusPillBackgroundBrush" Color="#172554" />
-    <SolidColorBrush x:Key="StatusPillTextBrush" Color="#BFDBFE" />
     <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#111827" />
     <SolidColorBrush x:Key="FooterBackgroundBrush" Color="#111827" />
     <SolidColorBrush x:Key="ButtonBackgroundBrush" Color="#1E293B" />
@@ -33,7 +29,6 @@
     <SolidColorBrush x:Key="SliderTrackBrush" Color="#334155" />
     <SolidColorBrush x:Key="SliderFillBrush" Color="#3B82F6" />
     <SolidColorBrush x:Key="SliderThumbBrush" Color="#E5E7EB" />
-    <SolidColorBrush x:Key="SuccessBrush" Color="#22C55E" />
     <SolidColorBrush x:Key="SectionHeaderBrush" Color="#93C5FD" />
     <SolidColorBrush x:Key="LabelBrush" Color="#AAB7C7" />
     <SolidColorBrush x:Key="KeyCapBackgroundBrush" Color="#1E293B" />
@@ -48,12 +43,4 @@
     <SolidColorBrush x:Key="LookInsetBrush" Color="#0B1220" />
     <SolidColorBrush x:Key="LookRowBrush" Color="#0F172A" />
     <SolidColorBrush x:Key="NavRailBackgroundBrush" Color="#080E1A" />
-
-    <SolidColorBrush x:Key="SurfaceBrush" Color="#0B1120" />
-    <SolidColorBrush x:Key="CardBrush" Color="#111827" />
-    <SolidColorBrush x:Key="BorderBrushSoft" Color="#263244" />
-    <SolidColorBrush x:Key="BorderBrushMedium" Color="#334155" />
-    <SolidColorBrush x:Key="TextPrimary" Color="#E5E7EB" />
-    <SolidColorBrush x:Key="TextSecondary" Color="#CBD5E1" />
-    <SolidColorBrush x:Key="TextMuted" Color="#94A3B8" />
 </ResourceDictionary>

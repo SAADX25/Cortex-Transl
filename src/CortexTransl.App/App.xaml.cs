@@ -47,8 +47,9 @@ public partial class App : System.Windows.Application
             {
                 _instanceMutex?.ReleaseMutex();
             }
-            catch
+            catch (Exception ex)
             {
+                AppLog.Write("instance-mutex-release", ex);
             }
         }
 
@@ -76,8 +77,9 @@ public partial class App : System.Windows.Application
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Write("error-dialog", ex);
         }
     }
 

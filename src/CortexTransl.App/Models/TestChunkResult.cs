@@ -7,5 +7,4 @@ public sealed class TestChunkResult
     public string TranslatedText { get; init; } = string.Empty;
     public bool IsEmpty => string.IsNullOrWhiteSpace(TranslatedText);
     public string StatusIcon => IsEmpty ? "⚠" : "✓";
-    public string StatusColor => IsEmpty ? "#FFB74D" : "#66BB6A";
 }

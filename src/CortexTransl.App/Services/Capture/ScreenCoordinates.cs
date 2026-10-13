@@ -38,20 +38,6 @@ public static class ScreenCoordinates
             : new CaptureRegion(x, y, width, height);
     }
 
-    public static CaptureRegion GetMonitorWorkArea(CaptureRegion region)
-    {
-        var rect = new NativeRect(region.X, region.Y, region.X + region.Width, region.Y + region.Height);
-        var monitor = MonitorFromRect(ref rect, MonitorDefaultToNearest);
-        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
-        if (monitor == nint.Zero || !GetMonitorInfo(monitor, ref info))
-        {
-            return GetVirtualScreenPhysical();
-        }
-
-        var work = info.Work;
-        return new CaptureRegion(work.Left, work.Top, work.Right - work.Left, work.Bottom - work.Top);
-    }
-
     public static DpiScale GetDpiForRegion(CaptureRegion region)
     {
         var nativeRect = region.IsEmpty
@@ -75,18 +61,6 @@ public static class ScreenCoordinates
 
     [DllImport("Shcore.dll")]
     private static extern int GetDpiForMonitor(nint monitor, int dpiType, out uint dpiX, out uint dpiY);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfo info);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MonitorInfo
-    {
-        public int Size;
-        public NativeRect Monitor;
-        public NativeRect Work;
-        public uint Flags;
-    }
 
     private enum SystemMetric
     {

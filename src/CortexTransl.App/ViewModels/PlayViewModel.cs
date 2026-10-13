@@ -6,16 +6,13 @@ using CortexTransl.App.Services.Profiles;
 using CortexTransl.App.Services.Settings;
 using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
-using System.Diagnostics;
 using System.Collections.ObjectModel;
 using CortexTransl.App.Services.Diagnostics;
 using System.IO;
-using System.Windows;
-using System.Windows.Threading;
 
 namespace CortexTransl.App.ViewModels;
 
-public sealed class PlayViewModel : ObservableObject, IDisposable
+public sealed partial class PlayViewModel : ObservableObject, IDisposable
 {
     public const string TargetLanguage = "ar";
 
@@ -29,6 +26,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private readonly AppSettingsService _appSettingsService;
     private readonly ThemeService _themeService;
     private readonly SemaphoreSlim _runLock = new(1, 1);
+    private readonly CancellationTokenSource _lifetime = new();
 
     private CaptureRegion _selectedRegion = CaptureRegion.Empty;
     private string _sourceLanguage = "en";
@@ -194,27 +192,6 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         new("deepl", "DeepL API")
     ];
 
-    public IReadOnlyList<OptionItem> TranslationModeOptions { get; } =
-    [
-        new("dialogue", "Story dialogue"),
-        new("list", "Menus & icons")
-    ];
-
-    public IReadOnlyList<OptionItem> OverlayPlacementOptions { get; } =
-    [
-        new("cover", "Cover original text"),
-        new("below", "Below dialogue box"),
-        new("above", "Above dialogue box")
-    ];
-
-    public IReadOnlyList<OptionItem> OverlayTextSizeOptions { get; } =
-    [
-        new("small", "Small"),
-        new("medium", "Medium"),
-        new("large", "Large"),
-        new("xlarge", "Extra large")
-    ];
-
     public ObservableCollection<GameProfile> Profiles { get; } = [];
 
     public AsyncRelayCommand DownloadOfflineModelCommand { get; }
@@ -301,6 +278,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                 _ = SaveSettingsAsync();
                 if (IsOfflineEngine)
                 {
+                    IsOfflineReady = _offlineProvider.IsPairReady(normalized);
                     _ = EnsureOfflineModelAsync();
                 }
             }
@@ -362,6 +340,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(SessionBadgeText));
                 TogglePlayCommand.RaiseCanExecuteChanged();
                 DownloadOfflineModelCommand.RaiseCanExecuteChanged();
+                RunTestCommand.RaiseCanExecuteChanged();
                 if (IsOfflineEngine)
                 {
                     if (_sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase))
@@ -391,6 +370,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(CanTranslate));
                 OnPropertyChanged(nameof(SessionBadgeText));
                 TogglePlayCommand.RaiseCanExecuteChanged();
+                RunTestCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -696,10 +676,6 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         _themeService.ApplyTheme(string.IsNullOrWhiteSpace(settings.Theme) ? "Dark" : settings.Theme);
         _sourceLanguage = string.IsNullOrWhiteSpace(settings.SourceLanguage) ? "en" : settings.SourceLanguage;
         _overlayPlacement = OverlaySettings.NormalizePlacement(settings.OverlayPlacement);
-        if (_overlayPlacement == "below")
-        {
-            _overlayPlacement = "cover";
-        }
         _translationMode = OverlaySettings.NormalizeMode(settings.TranslationMode);
         _overlayBackgroundOpacity = settings.OverlayBackgroundOpacity <= 0 ? 0.88 : settings.OverlayBackgroundOpacity;
         _overlayTextSize = OverlayTextSizes.Normalize(settings.OverlayTextSize);
@@ -719,7 +695,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         _translationProviderSettings.DeepLApiKey = _deepLApiKey;
         _translationProviderSettings.UseDeepLFreeApi = _useDeepLFreeApi;
         _translationProviderSettings.TranslationEngine = _translationEngine;
-        IsOfflineReady = _offlineProvider.IsEnglishArabicReady;
+        IsOfflineReady = _offlineProvider.IsPairReady(_sourceLanguage);
 
         if (settings.RegionWidth > 0 && settings.RegionHeight > 0)
         {
@@ -748,349 +724,6 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                     ? "Select the dialogue region with F9, then press F8."
                     : "Ready. F8 starts translation. F10 opens the menu."
                 : "Paste your DeepL API key, then select the dialogue region.";
-        }
-    }
-
-    public async Task HandleF8Async()
-    {
-        await TogglePlayAsync();
-    }
-
-    public async Task HandleF9Async()
-    {
-        if (_regionSelectionService.IsSelecting)
-        {
-            _regionSelectionService.Cancel();
-            StatusMessage = "Region selection closed.";
-            return;
-        }
-
-        await SelectRegionAsync();
-    }
-
-    private bool CanStartOrStop()
-    {
-        return IsPlaying || (CanTranslate && !SelectedRegion.IsEmpty && !_isBusy);
-    }
-
-    private async Task SelectRegionAsync()
-    {
-        var overlayWasVisible = _overlayService.IsVisible;
-        if (overlayWasVisible)
-        {
-            _overlayService.Hide();
-            await Task.Delay(40);
-        }
-
-        try
-        {
-            var region = await _regionSelectionService.SelectRegionAsync(
-                IsListMode
-                    ? "Drag around the menu or icon names — F9 or Esc to close"
-                    : "Drag around the story dialogue — F9 or Esc to close");
-            if (region is null || region.IsEmpty)
-            {
-                if (!_regionSelectionService.IsSelecting)
-                {
-                    StatusMessage = "Region selection closed.";
-                }
-
-                return;
-            }
-
-            SelectedRegion = ScreenCoordinates.ClampToVirtualScreen(region);
-            if (SelectedRegion.IsEmpty)
-            {
-                StatusMessage = "The selected region is outside the screen. Select it again.";
-                return;
-            }
-            _pipeline.Reset();
-            _pipeline.BindCapture(SelectedRegion, IsListMode);
-            if (IsPlaying)
-            {
-                PinOverlay();
-            }
-
-            await SaveSettingsAsync();
-            StatusMessage = "Region selected. Press F8 to start translation.";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = ex.Message;
-        }
-        finally
-        {
-            if (overlayWasVisible && IsPlaying)
-            {
-                PinOverlay();
-            }
-        }
-    }
-
-    private async Task TogglePlayAsync()
-    {
-        if (IsPlaying)
-        {
-            StopPlay();
-            StatusMessage = "Translation hidden. F8 starts it again. F10 opens the program.";
-            return;
-        }
-
-        if (!CanTranslate)
-        {
-            SelectedNavPage = "key";
-            StatusMessage = IsOfflineEngine
-                ? "Download the Arabic translation files first."
-                : "Paste a DeepL API key first.";
-            return;
-        }
-
-        if (SelectedRegion.IsEmpty)
-        {
-            SelectedNavPage = "region";
-            StatusMessage = "Select the dialogue region first.";
-            return;
-        }
-
-        IsPlaying = true;
-        _pipeline.Reset();
-        _pipeline.BindCapture(SelectedRegion, IsListMode, onlyIfUnbound: true);
-        _pipeline.Configure(string.IsNullOrWhiteSpace(ProfileName) ? "session" : ProfileName.Trim(), _storySettings);
-        _playCts?.Dispose();
-        _playCts = new CancellationTokenSource();
-        var token = _playCts.Token;
-        if (IsOfflineEngine)
-        {
-            StatusMessage = "Preparing resident offline translation...";
-            try { await _offlineProvider.WarmAsync(SourceLanguage, cancellationToken: token); }
-            catch (OperationCanceledException) { return; }
-            catch (Exception ex) { StatusMessage = ex.Message; StopPlay(); return; }
-            if (token.IsCancellationRequested || !IsPlaying) return;
-        }
-        StatusMessage = "Translation on. F8 stops it. F10 opens the program.";
-        if (MinimizeDuringPlay)
-        {
-            MinimizeRequested?.Invoke(this, EventArgs.Empty);
-        }
-
-        _ = Task.Run(() => PlayLoopAsync(token));
-        TogglePlayCommand.RaiseCanExecuteChanged();
-        await Task.CompletedTask;
-    }
-
-    private void StopPlay()
-    {
-        try
-        {
-            _playCts?.Cancel();
-        }
-        catch
-        {
-        }
-
-        IsPlaying = false;
-        _renderMeasurement?.Dispose(); _renderMeasurement = null;
-        _pipeline.Reset();
-        try
-        {
-            _overlayService.Hide();
-        }
-        catch
-        {
-        }
-    }
-
-    private async Task PlayLoopAsync(CancellationToken token)
-    {
-        try
-        {
-            while (!token.IsCancellationRequested)
-            {
-                var turnStarted = Stopwatch.GetTimestamp();
-                bool skipped;
-                try
-                {
-                    skipped = await RunTurnAsync(token);
-                }
-                catch (OperationCanceledException) when (token.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (ObjectDisposedException) when (_disposed)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    AppLog.Write("play-turn", ex);
-                    skipped = true;
-                    RunOnUi(() =>
-                    {
-                        if (!_disposed && IsPlaying)
-                        {
-                            StatusMessage = "Temporary capture or translation error. Retrying...";
-                        }
-                    });
-                }
-
-                // Cadence includes work; do not add a full interval after OCR.
-                var delay = Math.Max(5, _storySettings.EffectiveCaptureInterval - (int)Stopwatch.GetElapsedTime(turnStarted).TotalMilliseconds);
-                await Task.Delay(delay, token);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        catch (Exception ex)
-        {
-            AppLog.Write("play-loop", ex);
-            RunOnUi(() =>
-            {
-                if (_disposed)
-                {
-                    return;
-                }
-
-                StatusMessage = "Translation paused. Press F8 to start again.";
-                StopPlay();
-            });
-        }
-    }
-
-    private async Task<bool> RunTurnAsync(CancellationToken cancellationToken)
-    {
-        if (_disposed)
-        {
-            return true;
-        }
-
-        if (!await _runLock.WaitAsync(0, cancellationToken))
-        {
-            return true;
-        }
-
-        _isBusy = true;
-        RunOnUi(() => TogglePlayCommand.RaiseCanExecuteChanged());
-
-        try
-        {
-            if (_disposed)
-            {
-                return true;
-            }
-
-            _translationProviderSettings.DeepLApiKey = DeepLApiKey;
-            _translationProviderSettings.UseDeepLFreeApi = UseDeepLFreeApi;
-            _translationProviderSettings.TranslationEngine = TranslationEngine;
-
-            var listMode = IsListMode;
-            var result = await _pipeline.RunAsync(
-                SelectedRegion,
-                SourceLanguage,
-                TargetLanguage,
-                listMode,
-                cancellationToken);
-
-            RunOnUi(() => PublishResult(result, cancellationToken));
-
-            return result.Skipped || string.IsNullOrWhiteSpace(result.TranslatedText);
-        }
-        finally
-        {
-            _isBusy = false;
-            try
-            {
-                if (!_disposed)
-                {
-                    RunOnUi(() => TogglePlayCommand.RaiseCanExecuteChanged());
-                    _runLock.Release();
-                }
-            }
-            catch (ObjectDisposedException)
-            {
-            }
-        }
-    }
-
-    private void OnPipelineResultAvailable(PipelineResult result)
-    {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (_disposed || dispatcher is null || dispatcher.HasShutdownStarted) return;
-        dispatcher.BeginInvoke(() => PublishResult(result, _playCts?.Token ?? CancellationToken.None), DispatcherPriority.Render);
-    }
-
-    private void PublishResult(PipelineResult result, CancellationToken cancellationToken)
-    {
-        var latest = _pipeline.LatestResult;
-        if (_disposed || cancellationToken.IsCancellationRequested || result.Sequence != _pipeline.CurrentSequence
-            || result.CompletedTimestamp < latest.CompletedTimestamp) return;
-        var publication = Stopwatch.GetTimestamp();
-        if (result.ClearOverlay)
-        {
-            _renderMeasurement?.Dispose(); _renderMeasurement = null;
-            OriginalText = string.Empty; TranslatedText = string.Empty; _lastBlocks = [];
-            _overlayService.Hide();
-        }
-        if (!string.IsNullOrWhiteSpace(result.OriginalText)) OriginalText = result.OriginalText;
-        var textChanged = !string.IsNullOrWhiteSpace(result.TranslatedText) && TranslatedText != result.TranslatedText;
-        if (textChanged) TranslatedText = result.TranslatedText;
-        if (IsListMode && !result.Skipped && result.Blocks.Count > 0) { _lastBlocks = result.Blocks; textChanged = true; }
-        if (IsPlaying && (textChanged || !_overlayService.IsVisible) && (!IsListMode || _lastBlocks.Count > 0)
-            && !string.IsNullOrWhiteSpace(TranslatedText))
-        {
-            using var measured = _pipeline.Diagnostics.Measure(LatencyStage.OverlayPublication);
-            if (result.CompletedTimestamp != 0 && _presentedSequence != result.Sequence)
-                _pipeline.Diagnostics.Elapsed(LatencyStage.OverlayDispatch, result.CompletedTimestamp, publication);
-            _presentedSequence = result.Sequence;
-            PinOverlay();
-            if (_pipeline.Diagnostics.Enabled)
-            {
-                _renderMeasurement?.Dispose();
-                _renderMeasurement = new(_pipeline.Diagnostics, result, publication,
-                    () => !_disposed && IsPlaying && result.Sequence == _pipeline.CurrentSequence && _overlayService.IsVisible);
-            }
-        }
-        StatusMessage = result.Status;
-    }
-    private static void RunOnUi(Action action) => UiDispatch.Run(action);
-
-    private OverlaySettings CreateOverlaySettings()
-    {
-        return new OverlaySettings(OverlayPlacement, OverlayBackgroundOpacity, TranslationMode, OverlayFontScale, OverlayTextColor);
-    }
-
-    private void PinOverlay()
-    {
-        if (SelectedRegion.IsEmpty)
-        {
-            return;
-        }
-
-        _overlayService.Pin(SelectedRegion, CreateOverlaySettings());
-        if (IsListMode)
-        {
-            if (_lastBlocks.Count > 0)
-            {
-                _overlayService.SetBlocks(_lastBlocks);
-            }
-
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(TranslatedText))
-        {
-            _overlayService.SetText(TranslatedText);
-        }
-    }
-
-    private void RefreshOverlay()
-    {
-        if (IsPlaying)
-        {
-            PinOverlay();
         }
     }
 
@@ -1282,7 +915,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     private bool CanRunTest()
     {
-        return !_isTestRunning && !string.IsNullOrWhiteSpace(_testInputText) && CanTranslate;
+        return !_isTestRunning && !string.IsNullOrWhiteSpace(_testInputText) && IsOfflineEngine && IsOfflineReady;
     }
 
     private static readonly string[] TestSamples =
@@ -1303,7 +936,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     private async Task RunTranslationTestAsync()
     {
-        if (_isTestRunning || string.IsNullOrWhiteSpace(_testInputText))
+        if (!CanRunTest())
         {
             return;
         }
@@ -1313,91 +946,24 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         TestStatusMessage = "Translating...";
         TestChunks.Clear();
 
-        var sw = Stopwatch.StartNew();
         try
         {
-            var sourceText = _testInputText.Trim();
-            var chunks = TranslationChunker.Split(sourceText);
-            if (!_translationProviderSettings.UseOfflineEngine)
-            {
-                TestStatusMessage = "Switch to offline engine first. Test mode uses the offline Arabic files.";
-                return;
-            }
-
-            IReadOnlyList<string> translations;
-            try
-            {
-                translations = await _offlineProvider.TranslateManyAsync(
-                    chunks,
-                    SourceLanguage,
-                    TargetLanguage,
-                    contentKind: TranslationContentKind.GameDialogue);
-            }
-            catch (TranslationProviderException ex)
-            {
-                TestStatusMessage = $"Translation failed: {ex.Message}";
-                return;
-            }
-
-            var emptyCount = 0;
-            var totalChunks = chunks.Count;
-
-            for (var i = 0; i < totalChunks; i++)
-            {
-                var translated = i < translations.Count ? translations[i] : string.Empty;
-                if (string.IsNullOrWhiteSpace(translated))
-                {
-                    emptyCount++;
-                }
-
-                TestChunks.Add(new TestChunkResult
-                {
-                    Index = i + 1,
-                    OriginalText = chunks[i],
-                    TranslatedText = translated
-                });
-            }
-
-            var fullTranslation = TranslationChunker.Join(translations);
-            TestTranslatedText = fullTranslation;
-            sw.Stop();
-
-            var sourceLen = sourceText.Length;
-            var translatedLen = fullTranslation.Length;
-            var ratio = sourceLen > 0 ? (double)translatedLen / sourceLen : 0;
-
-            var issues = new List<string>();
-            if (string.IsNullOrWhiteSpace(fullTranslation))
-            {
-                issues.Add("Translation is completely empty");
-            }
-            else if (ratio < 0.3)
-            {
-                issues.Add($"Translation is very short ({ratio:P0} of original length)");
-            }
-
-            if (emptyCount > 0)
-            {
-                issues.Add($"{emptyCount}/{totalChunks} chunks returned empty");
-            }
-
-            if (issues.Count == 0)
-            {
-                TestStatusMessage = $"✓ All {totalChunks} chunks translated successfully in {sw.ElapsedMilliseconds}ms. " +
-                                    $"Source: {sourceLen} chars → Arabic: {translatedLen} chars ({ratio:P0}).";
-            }
-            else
-            {
-                TestStatusMessage = $"⚠ Issues found ({sw.ElapsedMilliseconds}ms): {string.Join(". ", issues)}.";
-            }
+            var result = await new TranslationTestRunner(_offlineProvider).RunAsync(
+                _testInputText, SourceLanguage, TargetLanguage, _lifetime.Token);
+            if (_disposed) return;
+            foreach (var chunk in result.Chunks) TestChunks.Add(chunk);
+            TestTranslatedText = result.Text;
+            TestStatusMessage = result.Status;
         }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            TestStatusMessage = $"Error: {ex.Message}";
+            if (!_disposed) TestStatusMessage = $"Translation failed: {ex.Message}";
+            AppLog.Write("translation-test", ex);
         }
         finally
         {
-            IsTestRunning = false;
+            if (!_disposed) IsTestRunning = false;
         }
     }
 
@@ -1408,12 +974,13 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
     private async Task EnsureOfflineModelAsync(bool downloadIfMissing = false)
     {
-        if (IsDownloadingModel)
+        if (_disposed || IsDownloadingModel)
         {
             return;
         }
 
-        if (!downloadIfMissing && !_offlineProvider.IsPairReady(SourceLanguage))
+        var language = SourceLanguage;
+        if (!downloadIfMissing && !_offlineProvider.IsPairReady(language))
         {
             IsOfflineReady = false;
             OfflineModelStatus = "Offline files are missing. Use Download before playback.";
@@ -1423,13 +990,15 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         IsDownloadingModel = true;
         var progress = new Progress<string>(message =>
         {
+            if (_disposed || SourceLanguage != language) return;
             OfflineModelStatus = message;
             StatusMessage = message;
         });
 
         try
         {
-            await _offlineProvider.EnsureReadyAsync(SourceLanguage, progress);
+            await _offlineProvider.EnsureReadyAsync(language, progress, _lifetime.Token);
+            if (_disposed || SourceLanguage != language) return;
             IsOfflineReady = true;
             OfflineModelStatus = "Arabic files are on this PC. No API key needed.";
             if (!IsPlaying)
@@ -1442,17 +1011,23 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(CanTranslate));
             OnPropertyChanged(nameof(SessionBadgeText));
             TogglePlayCommand.RaiseCanExecuteChanged();
-            await _offlineProvider.WarmAsync(SourceLanguage);
+            await _offlineProvider.WarmAsync(language, cancellationToken: _lifetime.Token);
         }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
+            if (_disposed || SourceLanguage != language) return;
             IsOfflineReady = _offlineProvider.IsPairReady(SourceLanguage);
             OfflineModelStatus = ex.Message;
             StatusMessage = ex.Message;
         }
         finally
         {
-            IsDownloadingModel = false;
+            if (!_disposed)
+            {
+                IsDownloadingModel = false;
+                if (SourceLanguage != language && IsOfflineEngine) _ = EnsureOfflineModelAsync();
+            }
         }
     }
 
@@ -1464,41 +1039,16 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
+        _lifetime.Cancel();
         StopPlay();
         _pipeline.ResultAvailable -= OnPipelineResultAvailable;
-        _pipeline.Dispose();
-        _pipeline.Diagnostics.Dispose();
-        try
-        {
-            _playCts?.Dispose();
-        }
-        catch
-        {
-        }
-
+        ResourceCleanup.Dispose(_pipeline, "pipeline-dispose");
+        ResourceCleanup.Dispose(_pipeline.Diagnostics, "diagnostics-dispose");
+        ResourceCleanup.Dispose(_playCts, "play-token-dispose");
         _playCts = null;
-        try
-        {
-            _offlineProvider.Dispose();
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            _overlayService.Dispose();
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            _runLock.Dispose();
-        }
-        catch
-        {
-        }
+        ResourceCleanup.Dispose(_offlineProvider, "offline-dispose");
+        ResourceCleanup.Dispose(_overlayService, "overlay-dispose");
+        ResourceCleanup.Dispose(_runLock, "play-lock-dispose");
+        _lifetime.Dispose();
     }
 }

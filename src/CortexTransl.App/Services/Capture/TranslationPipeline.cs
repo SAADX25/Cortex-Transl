@@ -71,6 +71,12 @@ public sealed class TranslationPipeline : IDisposable
         _capture.BindTarget(region, listMode, onlyIfUnbound);
     }
 
+    public void StopCapture()
+    {
+        Reset();
+        _capture.ReleaseSession();
+    }
+
     public void Configure(string gameKey, StorySettings settings)
     {
         var snapshot = settings.Clone();

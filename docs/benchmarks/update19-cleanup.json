@@ -1,0 +1,278 @@
+{
+  "Schema": 1,
+  "Date": "2026-10-13",
+  "BaselineCommit": "117b32d (Update-19)",
+  "Candidate": "cleaned working tree based on 117b32d",
+  "Protocol": "latency test only in each process; warmed models; fresh SQLite caches; 24 synthetic captions; real WGC/OCR/Bergamot/WPF",
+  "Scope": "controlled WPF animated source, real WGC/OCR/Bergamot/OverlayWindow; not a browser/game or physical display scanout measurement",
+  "Baseline": {
+    "Stages": {
+      "ModelInitialization": {
+        "Count": 1,
+        "P50": 116.928,
+        "P95": 116.928,
+        "Maximum": 116.928
+      },
+      "NativeWarmup": {
+        "Count": 1,
+        "P50": 175.9883,
+        "P95": 175.9883,
+        "Maximum": 175.9883
+      },
+      "WorkingSetMiB": {
+        "Count": 11,
+        "P50": 399.515625,
+        "P95": 403.96875,
+        "Maximum": 403.96875
+      },
+      "PrivateMemoryMiB": {
+        "Count": 11,
+        "P50": 591.36328125,
+        "P95": 595.13671875,
+        "Maximum": 595.13671875
+      },
+      "FrameWait": {
+        "Count": 164,
+        "P50": 0.0001,
+        "P95": 0.0006,
+        "Maximum": 0.0054
+      },
+      "GpuCopyReadback": {
+        "Count": 161,
+        "P50": 0.6286,
+        "P95": 1.1233,
+        "Maximum": 3.2914
+      },
+      "Capture": {
+        "Count": 164,
+        "P50": 0.7251,
+        "P95": 1.2317,
+        "Maximum": 6.5082
+      },
+      "TextChangeDetection": {
+        "Count": 164,
+        "P50": 0.8872,
+        "P95": 1.3677,
+        "Maximum": 2.9166
+      },
+      "Preprocess": {
+        "Count": 159,
+        "P50": 0.3301,
+        "P95": 5.5944,
+        "Maximum": 6.1145
+      },
+      "WindowsOcr": {
+        "Count": 159,
+        "P50": 5.4105,
+        "P95": 7.885,
+        "Maximum": 9.5687
+      },
+      "Stabilization": {
+        "Count": 36,
+        "P50": 0.0435,
+        "P95": 165.2679,
+        "Maximum": 168.7769
+      },
+      "QueueWait": {
+        "Count": 36,
+        "P50": 0.059,
+        "P95": 0.8403,
+        "Maximum": 5.9589
+      },
+      "CacheLookup": {
+        "Count": 36,
+        "P50": 4.4569,
+        "P95": 10.4214,
+        "Maximum": 14.556
+      },
+      "NativeInference": {
+        "Count": 10,
+        "P50": 9.0032,
+        "P95": 23.0448,
+        "Maximum": 23.0448
+      },
+      "OverlayDispatch": {
+        "Count": 24,
+        "P50": 8.1211,
+        "P95": 12.8217,
+        "Maximum": 12.9576
+      },
+      "OverlayPublication": {
+        "Count": 24,
+        "P50": 5.274,
+        "P95": 9.6961,
+        "Maximum": 9.8838
+      },
+      "OverlayRender": {
+        "Count": 24,
+        "P50": 13.5607,
+        "P95": 28.641,
+        "Maximum": 31.2372
+      },
+      "ControlledAppearanceToOverlayRender": {
+        "Count": 24,
+        "P50": 208.7972,
+        "P95": 285.3317,
+        "Maximum": 302.5833
+      },
+      "CpuPercentOfMachine": {
+        "Count": 10,
+        "P50": 6.702479314421085,
+        "P95": 11.47697132939356,
+        "Maximum": 11.47697132939356
+      },
+      "GpuBusiestEnginePercent": {
+        "Count": 10,
+        "P50": 4.361900222863802,
+        "P95": 5.169349762327399,
+        "Maximum": 5.169349762327399
+      },
+      "OcrRecovery": {
+        "Count": 2,
+        "P50": 5.1172,
+        "P95": 7.3801,
+        "Maximum": 7.3801
+      }
+    },
+    "Readbacks": 161,
+    "ReadbackBytes": 131891200,
+    "StagingAllocations": 1,
+    "WallSeconds": 11.6070035,
+    "CpuSeconds": 10.484375
+  },
+  "Cleaned": {
+    "Stages": {
+      "ModelInitialization": {
+        "Count": 1,
+        "P50": 94.3268,
+        "P95": 94.3268,
+        "Maximum": 94.3268
+      },
+      "NativeWarmup": {
+        "Count": 1,
+        "P50": 175.2289,
+        "P95": 175.2289,
+        "Maximum": 175.2289
+      },
+      "WorkingSetMiB": {
+        "Count": 11,
+        "P50": 402.56640625,
+        "P95": 405.15625,
+        "Maximum": 405.15625
+      },
+      "PrivateMemoryMiB": {
+        "Count": 11,
+        "P50": 592.5390625,
+        "P95": 596.21484375,
+        "Maximum": 596.21484375
+      },
+      "FrameWait": {
+        "Count": 163,
+        "P50": 0.0001,
+        "P95": 0.0005,
+        "Maximum": 0.1321
+      },
+      "GpuCopyReadback": {
+        "Count": 160,
+        "P50": 0.6328,
+        "P95": 1.2544,
+        "Maximum": 13.3296
+      },
+      "Capture": {
+        "Count": 163,
+        "P50": 0.736,
+        "P95": 1.3862,
+        "Maximum": 13.4682
+      },
+      "TextChangeDetection": {
+        "Count": 163,
+        "P50": 0.8737,
+        "P95": 1.304,
+        "Maximum": 2.4421
+      },
+      "Preprocess": {
+        "Count": 165,
+        "P50": 1.392,
+        "P95": 5.8049,
+        "Maximum": 8.477
+      },
+      "WindowsOcr": {
+        "Count": 165,
+        "P50": 4.9871,
+        "P95": 7.8363,
+        "Maximum": 8.9444
+      },
+      "Stabilization": {
+        "Count": 34,
+        "P50": 0.0647,
+        "P95": 161.2636,
+        "Maximum": 163.9827
+      },
+      "QueueWait": {
+        "Count": 34,
+        "P50": 0.0468,
+        "P95": 0.2035,
+        "Maximum": 0.6946
+      },
+      "CacheLookup": {
+        "Count": 34,
+        "P50": 4.6124,
+        "P95": 10.1125,
+        "Maximum": 10.2384
+      },
+      "NativeInference": {
+        "Count": 10,
+        "P50": 9.6775,
+        "P95": 25.9132,
+        "Maximum": 25.9132
+      },
+      "OverlayDispatch": {
+        "Count": 24,
+        "P50": 8.8461,
+        "P95": 14.0113,
+        "Maximum": 14.4298
+      },
+      "OverlayPublication": {
+        "Count": 24,
+        "P50": 5.9207,
+        "P95": 10.1021,
+        "Maximum": 10.5955
+      },
+      "OverlayRender": {
+        "Count": 24,
+        "P50": 13.8781,
+        "P95": 23.7669,
+        "Maximum": 27.6401
+      },
+      "ControlledAppearanceToOverlayRender": {
+        "Count": 24,
+        "P50": 192.3597,
+        "P95": 293.0359,
+        "Maximum": 305.2128
+      },
+      "OcrRecovery": {
+        "Count": 9,
+        "P50": 6.1573,
+        "P95": 10.4017,
+        "Maximum": 10.4017
+      },
+      "CpuPercentOfMachine": {
+        "Count": 10,
+        "P50": 7.280685418632206,
+        "P95": 10.752582166158662,
+        "Maximum": 10.752582166158662
+      },
+      "GpuBusiestEnginePercent": {
+        "Count": 10,
+        "P50": 4.236954729615292,
+        "P95": 5.1925950827977125,
+        "Maximum": 5.1925950827977125
+      }
+    },
+    "Readbacks": 160,
+    "ReadbackBytes": 131072000,
+    "StagingAllocations": 1,
+    "WallSeconds": 11.5627792,
+    "CpuSeconds": 10.609375
+  }
+}

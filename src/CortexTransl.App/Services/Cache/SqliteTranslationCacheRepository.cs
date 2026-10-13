@@ -1,12 +1,14 @@
 using CortexTransl.App.Data;
 using CortexTransl.App.Utils;
 using Microsoft.Data.Sqlite;
+using System.Diagnostics;
 
 namespace CortexTransl.App.Services.Cache;
 
 public sealed class SqliteTranslationCacheRepository : ITranslationCacheRepository
 {
     private readonly SqliteConnectionFactory _connectionFactory;
+    private long _nextFailureLog;
 
     public SqliteTranslationCacheRepository(SqliteConnectionFactory connectionFactory)
     {
@@ -66,8 +68,9 @@ public sealed class SqliteTranslationCacheRepository : ITranslationCacheReposito
         {
             throw;
         }
-        catch
+        catch (Exception ex)
         {
+            ReportFailure(ex);
             return null;
         }
     }
@@ -114,9 +117,19 @@ public sealed class SqliteTranslationCacheRepository : ITranslationCacheReposito
         {
             throw;
         }
-        catch
+        catch (Exception ex)
         {
+            ReportFailure(ex);
         }
+    }
+
+    private void ReportFailure(Exception exception)
+    {
+        var now = Stopwatch.GetTimestamp();
+        var next = Interlocked.Read(ref _nextFailureLog);
+        if (now < next || Interlocked.CompareExchange(ref _nextFailureLog,
+            now + Stopwatch.Frequency * 5, next) != next) return;
+        AppLog.Write("translation-cache", exception);
     }
 
     private static async Task IncrementHitCountAsync(SqliteConnection connection, long id, CancellationToken cancellationToken)

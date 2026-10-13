@@ -25,6 +25,16 @@ jobs:
         run: dotnet build CortexTransl.sln --configuration Release --no-restore
       - name: Test
         run: dotnet test CortexTransl.sln --configuration Release --no-build --logger "trx;LogFileName=reliability.trx" --results-directory TestResults
+      - name: Software D3D11 and offline menu checks
+        run: dotnet run --project tools/CaptureChecks --configuration Release --no-build
+      - name: Validate self-contained Release packaging
+        run: dotnet publish src/CortexTransl.App/CortexTransl.App.csproj -c Release -p:PublishProfile=Win64
+      - name: Require native Release payload
+        shell: pwsh
+        run: |
+          foreach ($file in 'CortexTransl.App.exe', 'bergamot.dll', 'e_sqlite3.dll', 'coreclr.dll') {
+            if (-not (Test-Path (Join-Path 'dist/win-x64' $file))) { throw "Missing published payload: $file" }
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -237,6 +237,8 @@ diagnostics are enabled will not retroactively appear in a production report.
 - The selected-window privacy boundary remains mandatory in dialogue mode: loss
   of the bound window clears/cancels work without desktop fallback. Explicit menu
   capture retains its existing selected-target fallback. No game injection or
-  game-file changes were used. Border suppression is best-effort and OS-dependent.
+  game-file changes were used. Current production capture keeps Windows' capture
+  indicator; it does not request borderless capture permission. The frozen
+  Update-17 benchmark still retains its historical best-effort border call.
 
 GPU copy contract reference: [Microsoft CopySubresourceRegion documentation](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-copysubresourceregion).
