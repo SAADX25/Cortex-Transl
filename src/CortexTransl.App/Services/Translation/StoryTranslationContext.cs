@@ -24,6 +24,13 @@ public sealed record StoryTranslationContext
         Names = SpeakerNames.OrderBy(x => x.Key, StringComparer.Ordinal).ToArray(), DeepLGlossaryId
     }));
 
+    public string OfflineCacheScope => TextHasher.Sha256(JsonSerializer.Serialize(new
+    {
+        Version = 4, GameKey,
+        Terms = Terminology.OrderBy(x => x.Key, StringComparer.Ordinal).ToArray(),
+        Names = SpeakerNames.OrderBy(x => x.Key, StringComparer.Ordinal).ToArray()
+    }));
+
     public string ToDeepLContext()
     {
         var text = new StringBuilder();

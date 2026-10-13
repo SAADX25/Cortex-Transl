@@ -5,6 +5,7 @@ public interface ITranslationProvider
     string Id { get; }
 
     bool SupportsContextualLongText { get; }
+    bool UsesHistoricalContext => SupportsContextualLongText;
 
     // Engines without contextual support translate only the current utterance.
     Task<string> TranslateStoryAsync(string text, string sourceLanguage, string targetLanguage,

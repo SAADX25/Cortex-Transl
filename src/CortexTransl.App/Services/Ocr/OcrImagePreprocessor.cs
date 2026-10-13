@@ -31,7 +31,33 @@ public static class OcrImagePreprocessor
             Sharpen(scaled.Bitmap);
         }
 
+        if (preset == "caption-strokes") SuppressFullHeightBrightBars(scaled.Bitmap);
+
         return scaled;
+    }
+
+    private static unsafe void SuppressFullHeightBrightBars(Bitmap bitmap)
+    {
+        // After bright-stroke inversion, almost-full-height black columns are
+        // scene bars, not subtitle-height glyphs. This recovery leaves smaller
+        // strokes, apostrophes and punctuation intact.
+        var width = bitmap.Width; var height = bitmap.Height;
+        var data = bitmap.LockBits(new(0, 0, width, height), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+        try
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var dark = 0;
+                for (var y = 0; y < height; y++) if (*((byte*)data.Scan0 + y * data.Stride + x * 4) == 0) dark++;
+                if (dark < height * .85) continue;
+                for (var y = 0; y < height; y++)
+                {
+                    var pixel = (byte*)data.Scan0 + y * data.Stride + x * 4;
+                    pixel[0] = pixel[1] = pixel[2] = 255;
+                }
+            }
+        }
+        finally { bitmap.UnlockBits(data); }
     }
 
     private static unsafe Rectangle FindUniformBackgroundTextBounds(Bitmap source)
@@ -277,6 +303,8 @@ public static class OcrImagePreprocessor
             {
                 "original" => new OcrPreprocessingOptions("Original colors", 1.0, 1.0, 1.0, false, false, false, 128, false),
                 "reduced-text" => new OcrPreprocessingOptions("Reduced text", 0.6, 0.6, 1.0, false, false, false, 128, false),
+                "caption-strokes" => new OcrPreprocessingOptions("Bright caption strokes", 1.0, 1.0, 1.0,
+                    true, false, true, 210, false, Invert: true),
                 "small-text" => new OcrPreprocessingOptions(
                     "Small Text",
                     2.0,

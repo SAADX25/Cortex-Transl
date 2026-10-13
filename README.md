@@ -270,3 +270,5 @@ Built with ❤️ for Arabic gamers — **Cortex Transl v1.6.0**
 ## Story dialogue reliability
 
 See [the reliability upgrade report](docs/STORY_TRANSLATION_RELIABILITY.md) for story context and terminology setup, subtitle timing, window-bound capture behavior, automated test evidence, measured performance, and real-game verification limits.
+
+See [the offline subtitle latency report](docs/OFFLINE_SUBTITLE_LATENCY.md) for the optional Fast Subtitles profile, controlled Windows measurements against Update-17, per-stage P50/P95, resource usage, reproduction commands, and remaining Arabic quality and real-game limitations.

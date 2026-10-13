@@ -9,6 +9,8 @@ using CortexTransl.App.Utils;
 using System.Diagnostics;
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using CortexTransl.App.Services.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -59,6 +61,18 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private string _testStatusMessage = "Type or paste English text, then press Test to check translation quality.";
     private bool _isTestRunning;
     private StorySettings _storySettings = new();
+    private OverlayRenderMeasurement? _renderMeasurement;
+    private long _presentedSequence = -1;
+    public bool FastSubtitles { get => _storySettings.FastSubtitles; set { _storySettings.FastSubtitles = value; UpdateStorySettings(); } }
+    public bool PerformanceDiagnosticsEnabled { get => _storySettings.PerformanceDiagnostics; set { _storySettings.PerformanceDiagnostics = value; UpdateStorySettings(); } }
+    public RelayCommand ExportPerformanceCommand { get; }
+
+    private void ExportPerformance()
+    {
+        var path = Path.Combine(AppDataPaths.CreateDefault().DataDirectory, "logs", "subtitle-performance.json");
+        _pipeline.Diagnostics.Export(path);
+        StatusMessage = $"Latency report saved to {path}. Timing and resource numbers only.";
+    }
 
     public string SpeakerIdentity { get => _storySettings.Speaker; set { _storySettings.Speaker = value; UpdateStorySettings(); } }
     public string SceneState { get => _storySettings.SceneState; set { _storySettings.SceneState = value; UpdateStorySettings(); } }
@@ -99,7 +113,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
     private void LoadStorySettings(StorySettings? settings)
     {
         _storySettings = JsonSerializer.Deserialize<StorySettings>(JsonSerializer.Serialize(settings ?? new())) ?? new();
-        foreach (var property in new[] { nameof(SpeakerIdentity), nameof(SceneState), nameof(DeepLGlossaryId), nameof(TerminologyText),
+        foreach (var property in new[] { nameof(FastSubtitles), nameof(PerformanceDiagnosticsEnabled), nameof(SpeakerIdentity), nameof(SceneState), nameof(DeepLGlossaryId), nameof(TerminologyText),
             nameof(SpeakerNamesText), nameof(SubtitleGraceMilliseconds), nameof(SubtitleMaximumMilliseconds), nameof(TextStabilityMilliseconds) })
             OnPropertyChanged(property);
         _pipeline.Configure(string.IsNullOrWhiteSpace(ProfileName) ? "session" : ProfileName.Trim(), _storySettings);
@@ -125,10 +139,12 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         _offlineProvider = offlineProvider;
         _appSettingsService = appSettingsService;
         _themeService = themeService;
+        _pipeline.ResultAvailable += OnPipelineResultAvailable;
+        ExportPerformanceCommand = new RelayCommand(_ => ExportPerformance());
 
         SelectRegionCommand = new AsyncRelayCommand(_ => SelectRegionAsync());
         TogglePlayCommand = new AsyncRelayCommand(_ => TogglePlayAsync(), _ => CanStartOrStop());
-        DownloadOfflineModelCommand = new AsyncRelayCommand(_ => EnsureOfflineModelAsync(), _ => CanDownloadModel());
+        DownloadOfflineModelCommand = new AsyncRelayCommand(_ => EnsureOfflineModelAsync(downloadIfMissing: true), _ => CanDownloadModel());
         SaveProfileCommand = new AsyncRelayCommand(_ => SaveProfileAsync(), _ => CanSaveProfile());
         UsePresetCommand = new RelayCommand(parameter => UsePreset(parameter as GameProfile), parameter => parameter is GameProfile);
         DeletePresetCommand = new AsyncRelayCommand(
@@ -887,13 +903,22 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         _pipeline.Configure(string.IsNullOrWhiteSpace(ProfileName) ? "session" : ProfileName.Trim(), _storySettings);
         _playCts?.Dispose();
         _playCts = new CancellationTokenSource();
+        var token = _playCts.Token;
+        if (IsOfflineEngine)
+        {
+            StatusMessage = "Preparing resident offline translation...";
+            try { await _offlineProvider.WarmAsync(SourceLanguage, cancellationToken: token); }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) { StatusMessage = ex.Message; StopPlay(); return; }
+            if (token.IsCancellationRequested || !IsPlaying) return;
+        }
         StatusMessage = "Translation on. F8 stops it. F10 opens the program.";
         if (MinimizeDuringPlay)
         {
             MinimizeRequested?.Invoke(this, EventArgs.Empty);
         }
 
-        _ = Task.Run(() => PlayLoopAsync(_playCts.Token));
+        _ = Task.Run(() => PlayLoopAsync(token));
         TogglePlayCommand.RaiseCanExecuteChanged();
         await Task.CompletedTask;
     }
@@ -909,6 +934,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
 
         IsPlaying = false;
+        _renderMeasurement?.Dispose(); _renderMeasurement = null;
         _pipeline.Reset();
         try
         {
@@ -925,6 +951,7 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         {
             while (!token.IsCancellationRequested)
             {
+                var turnStarted = Stopwatch.GetTimestamp();
                 bool skipped;
                 try
                 {
@@ -951,7 +978,8 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                     });
                 }
 
-                var delay = Math.Clamp(_storySettings.CaptureIntervalMilliseconds, 50, 500);
+                // Cadence includes work; do not add a full interval after OCR.
+                var delay = Math.Max(5, _storySettings.EffectiveCaptureInterval - (int)Stopwatch.GetElapsedTime(turnStarted).TotalMilliseconds);
                 await Task.Delay(delay, token);
             }
         }
@@ -1011,65 +1039,9 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
                 listMode,
                 cancellationToken);
 
-            var original = result.OriginalText;
-            var translated = result.TranslatedText;
-            var skipped = result.Skipped;
-            var status = result.Status;
-            var blocks = result.Blocks;
-            var playing = IsPlaying && !_disposed;
+            RunOnUi(() => PublishResult(result, cancellationToken));
 
-            RunOnUi(() =>
-            {
-                if (_disposed || cancellationToken.IsCancellationRequested || result.Sequence != _pipeline.CurrentSequence)
-                {
-                    return;
-                }
-
-                if (result.ClearOverlay)
-                {
-                    OriginalText = string.Empty;
-                    TranslatedText = string.Empty;
-                    _lastBlocks = [];
-                    _overlayService.Hide();
-                }
-
-                if (!string.IsNullOrWhiteSpace(original))
-                {
-                    OriginalText = original;
-                }
-
-                var textChanged = false;
-                if (!string.IsNullOrWhiteSpace(translated) && translated != TranslatedText)
-                {
-                    TranslatedText = translated;
-                    textChanged = true;
-                }
-
-                if (listMode && !skipped && blocks.Count > 0)
-                {
-                    _lastBlocks = blocks;
-                    textChanged = true;
-                }
-
-                if (playing && (textChanged || !_overlayService.IsVisible))
-                {
-                    if (listMode)
-                    {
-                        if (_lastBlocks.Count > 0)
-                        {
-                            PinOverlay();
-                        }
-                    }
-                    else if (!string.IsNullOrWhiteSpace(TranslatedText))
-                    {
-                        PinOverlay();
-                    }
-                }
-
-                StatusMessage = status;
-            });
-
-            return skipped || string.IsNullOrWhiteSpace(translated);
+            return result.Skipped || string.IsNullOrWhiteSpace(result.TranslatedText);
         }
         finally
         {
@@ -1088,6 +1060,46 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void OnPipelineResultAvailable(PipelineResult result)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (_disposed || dispatcher is null || dispatcher.HasShutdownStarted) return;
+        dispatcher.BeginInvoke(() => PublishResult(result, _playCts?.Token ?? CancellationToken.None), DispatcherPriority.Render);
+    }
+
+    private void PublishResult(PipelineResult result, CancellationToken cancellationToken)
+    {
+        var latest = _pipeline.LatestResult;
+        if (_disposed || cancellationToken.IsCancellationRequested || result.Sequence != _pipeline.CurrentSequence
+            || result.CompletedTimestamp < latest.CompletedTimestamp) return;
+        var publication = Stopwatch.GetTimestamp();
+        if (result.ClearOverlay)
+        {
+            _renderMeasurement?.Dispose(); _renderMeasurement = null;
+            OriginalText = string.Empty; TranslatedText = string.Empty; _lastBlocks = [];
+            _overlayService.Hide();
+        }
+        if (!string.IsNullOrWhiteSpace(result.OriginalText)) OriginalText = result.OriginalText;
+        var textChanged = !string.IsNullOrWhiteSpace(result.TranslatedText) && TranslatedText != result.TranslatedText;
+        if (textChanged) TranslatedText = result.TranslatedText;
+        if (IsListMode && !result.Skipped && result.Blocks.Count > 0) { _lastBlocks = result.Blocks; textChanged = true; }
+        if (IsPlaying && (textChanged || !_overlayService.IsVisible) && (!IsListMode || _lastBlocks.Count > 0)
+            && !string.IsNullOrWhiteSpace(TranslatedText))
+        {
+            using var measured = _pipeline.Diagnostics.Measure(LatencyStage.OverlayPublication);
+            if (result.CompletedTimestamp != 0 && _presentedSequence != result.Sequence)
+                _pipeline.Diagnostics.Elapsed(LatencyStage.OverlayDispatch, result.CompletedTimestamp, publication);
+            _presentedSequence = result.Sequence;
+            PinOverlay();
+            if (_pipeline.Diagnostics.Enabled)
+            {
+                _renderMeasurement?.Dispose();
+                _renderMeasurement = new(_pipeline.Diagnostics, result, publication,
+                    () => !_disposed && IsPlaying && result.Sequence == _pipeline.CurrentSequence && _overlayService.IsVisible);
+            }
+        }
+        StatusMessage = result.Status;
+    }
     private static void RunOnUi(Action action)
     {
         try
@@ -1513,10 +1525,17 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
         return IsOfflineEngine && !IsDownloadingModel;
     }
 
-    private async Task EnsureOfflineModelAsync()
+    private async Task EnsureOfflineModelAsync(bool downloadIfMissing = false)
     {
         if (IsDownloadingModel)
         {
+            return;
+        }
+
+        if (!downloadIfMissing && !_offlineProvider.IsPairReady(SourceLanguage))
+        {
+            IsOfflineReady = false;
+            OfflineModelStatus = "Offline files are missing. Use Download before playback.";
             return;
         }
 
@@ -1542,20 +1561,11 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(CanTranslate));
             OnPropertyChanged(nameof(SessionBadgeText));
             TogglePlayCommand.RaiseCanExecuteChanged();
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _offlineProvider.TranslateAsync("Hello.", "en", "ar");
-                }
-                catch
-                {
-                }
-            });
+            await _offlineProvider.WarmAsync(SourceLanguage);
         }
         catch (Exception ex)
         {
-            IsOfflineReady = _offlineProvider.IsEnglishArabicReady;
+            IsOfflineReady = _offlineProvider.IsPairReady(SourceLanguage);
             OfflineModelStatus = ex.Message;
             StatusMessage = ex.Message;
         }
@@ -1574,7 +1584,9 @@ public sealed class PlayViewModel : ObservableObject, IDisposable
 
         _disposed = true;
         StopPlay();
+        _pipeline.ResultAvailable -= OnPipelineResultAvailable;
         _pipeline.Dispose();
+        _pipeline.Diagnostics.Dispose();
         try
         {
             _playCts?.Dispose();

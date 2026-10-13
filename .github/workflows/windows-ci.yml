@@ -1,7 +1,13 @@
-name: Windows build and reliability tests
+name: Windows build and subtitle reliability tests
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      interactive_benchmark:
+        description: Run WGC benchmark on a configured interactive Windows runner with installed en-ar models
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -24,3 +30,37 @@ jobs:
         with:
           name: reliability-results
           path: TestResults
+          retention-days: 14
+  interactive-benchmark:
+    if: github.event_name == 'workflow_dispatch' && inputs.interactive_benchmark
+    # WGC requires a signed-in desktop. A hosted/service desktop must not be
+    # presented as evidence of real GPU/window capture or actual game latency.
+    runs-on: [self-hosted, Windows, interactive-desktop]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore CortexTransl.sln
+      - run: dotnet build CortexTransl.sln -c Release --no-restore
+      - name: Require preinstalled offline models
+        shell: pwsh
+        run: |
+          if (-not $env:CORTEX_TRANSL_TEST_MODELS -or -not (Test-Path (Join-Path $env:CORTEX_TRANSL_TEST_MODELS 'en-ar/config.yml'))) {
+            throw 'Configure CORTEX_TRANSL_TEST_MODELS on the interactive runner; benchmark playback never downloads models.'
+          }
+      - name: Controlled actual Windows capture benchmark
+        shell: pwsh
+        run: |
+          $env:CORTEX_TRANSL_RUN_WINDOWS_BENCHMARK = '1'
+          $env:CORTEX_TRANSL_BENCHMARK_OUTPUT = Join-Path $pwd 'artifacts/latency-benchmark'
+          dotnet test CortexTransl.sln -c Release --no-build --filter 'FullyQualifiedName~ControlledWindowsBenchmark' --logger 'trx;LogFileName=windows-latency.trx' --results-directory TestResults
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: controlled-windows-latency
+          path: |
+            TestResults
+            artifacts/latency-benchmark/*.json
+          retention-days: 14

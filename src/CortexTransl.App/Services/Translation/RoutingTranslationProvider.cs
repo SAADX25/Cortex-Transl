@@ -19,6 +19,7 @@ public sealed class RoutingTranslationProvider : ITranslationProvider
     public string Id => UseOffline ? _offline.Id : _online.Id;
 
     public bool SupportsContextualLongText => Active.SupportsContextualLongText;
+    public bool UsesHistoricalContext => Active.UsesHistoricalContext;
 
     private bool UseOffline => _settings.UseOfflineEngine;
 

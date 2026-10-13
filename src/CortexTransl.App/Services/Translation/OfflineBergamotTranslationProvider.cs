@@ -1,5 +1,6 @@
 using BergamotTranslatorSharp;
 using CortexTransl.App.Utils;
+using CortexTransl.App.Services.Diagnostics;
 
 namespace CortexTransl.App.Services.Translation;
 
@@ -9,21 +10,50 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
     private readonly Dictionary<string, BlockingService> _services = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private bool _disposed;
+    private readonly PerformanceDiagnostics _diagnostics;
 
-    public OfflineBergamotTranslationProvider(OfflineModelInstaller installer)
+    public OfflineBergamotTranslationProvider(OfflineModelInstaller installer, PerformanceDiagnostics? diagnostics = null)
     {
         _installer = installer;
+        _diagnostics = diagnostics ?? new();
     }
 
     public string Id => "offline";
 
     public bool SupportsContextualLongText => false;
+    public bool UsesHistoricalContext => false;
+    public bool IsPairReady(string source, string target = "ar") => _installer.DirectionsFor(source, target).All(_installer.IsPairReady);
+
+    public Task WarmAsync(string source, string target = "ar", CancellationToken cancellationToken = default)
+    {
+        RequireInstalledModels(source, target);
+        return Task.Run(() =>
+        {
+            lock (_gate)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                var key = string.Join('|', _installer.DirectionsFor(source, target));
+                if (_services.ContainsKey(key)) return;
+                var service = GetService(source, target);
+                using (_diagnostics.Measure(LatencyStage.NativeWarmup)) TranslateText(service, "Hello.");
+            }
+        }, cancellationToken);
+    }
+
+    private void RequireInstalledModels(string source, string target)
+    {
+        if (!IsPairReady(source, target))
+            throw new TranslationProviderException("Offline files are missing. Download this language pair before playback.", "offline model missing");
+    }
 
     public async Task<string> TranslateStoryAsync(string text, string sourceLanguage, string targetLanguage,
         StoryTranslationContext context, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (context.TryExactArabicTerm(text, sourceLanguage, targetLanguage, out var term)) return term;
+        if (text.Length <= 350 && !text.Contains('\n'))
+            return await TranslateAsync(text, sourceLanguage, targetLanguage, cancellationToken, TranslationContentKind.GameDialogue);
         var chunks = TranslationChunker.Split(text);
         var translated = await TranslateManyAsync(chunks, sourceLanguage, targetLanguage, cancellationToken, TranslationContentKind.GameDialogue);
         cancellationToken.ThrowIfCancellationRequested();
@@ -93,7 +123,8 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
             return results;
         }
 
-        await _installer.EnsureReadyAsync(sourceLanguage, targetLanguage, cancellationToken: cancellationToken);
+        // Playback never downloads a model or falls back to a network provider.
+        RequireInstalledModels(sourceLanguage, targetLanguage);
         return await Task.Run(() =>
         {
             lock (_gate)
@@ -110,7 +141,8 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var text = useUiTerms ? ArabicUiLabels.Normalize(texts[index]) : texts[index];
-                    results[index] = TranslateText(service, text);
+                    using (_diagnostics.Measure(LatencyStage.NativeInference)) results[index] = TranslateText(service, text);
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
             }
 
@@ -134,6 +166,7 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
             return existing;
         }
 
+        using var initialization = _diagnostics.Measure(LatencyStage.ModelInitialization);
         var configs = directions.Select(_installer.GetRuntimeConfigPath).ToArray();
         BlockingService service;
         try

@@ -1,14 +1,15 @@
 using CortexTransl.App.Models;
 using CortexTransl.App.Utils;
 using CortexTransl.App.Views;
+using CortexTransl.App.Services.Diagnostics;
 using System.Drawing;
-using System.Windows;
-using System.Windows.Threading;
 
 namespace CortexTransl.App.Services.Capture;
 
 public sealed class ScreenCaptureService : IScreenCaptureService
 {
+    private readonly PerformanceDiagnostics _diagnostics;
+    public ScreenCaptureService(PerformanceDiagnostics? diagnostics = null) { _diagnostics = diagnostics ?? new(); }
     private readonly object _gate = new();
     private WindowsGraphicsWindowCapturer? _capturer;
     private DateTime _nextGraphicsCaptureAttemptUtc;
@@ -147,7 +148,7 @@ public sealed class ScreenCaptureService : IScreenCaptureService
             _capturer = null;
         }
 
-        var created = CreateOnUi(() => WindowsGraphicsWindowCapturer.TryCreate(window));
+        var created = WindowsGraphicsWindowCapturer.TryCreate(window, _diagnostics);
         if (created is null)
         {
             lock (_gate)
@@ -185,26 +186,4 @@ public sealed class ScreenCaptureService : IScreenCaptureService
         }
     }
 
-    private static T CreateOnUi<T>(Func<T> factory)
-    {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
-        {
-            return factory();
-        }
-
-        if (dispatcher.CheckAccess())
-        {
-            return factory();
-        }
-
-        try
-        {
-            return dispatcher.Invoke(factory, DispatcherPriority.Send);
-        }
-        catch
-        {
-            return factory();
-        }
-    }
 }

@@ -5,13 +5,16 @@ using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
 using System.Text.Json;
 using System.Threading.Channels;
+using System.Diagnostics;
+using CortexTransl.App.Services.Diagnostics;
 
 namespace CortexTransl.App.Services.Capture;
 
 public sealed class TranslationPipeline : IDisposable
 {
     private sealed record Work(long Sequence, OcrResult Ocr, string Text, string Source, string Target,
-        bool ListMode, StoryTranslationContext Context, string ProviderId, string CacheId, CancellationToken Token);
+        bool ListMode, StoryTranslationContext Context, string ProviderId, string CacheId, CancellationToken Token,
+        long ObservedAt, long QueuedAt);
 
     private readonly IScreenCaptureService _capture;
     private readonly IOcrEngine _ocr;
@@ -39,9 +42,16 @@ public sealed class TranslationPipeline : IDisposable
     private string? _lastOcrError;
     private long _lastOcrErrorAt;
     private bool _disposed;
+    private ulong? _visualSignature;
+    private long _observedAt;
+    private long _recognizedAt;
+    public PerformanceDiagnostics Diagnostics { get; }
+    public event Action<PipelineResult>? ResultAvailable;
+    public PipelineResult LatestResult { get { lock (_gate) return _result; } }
 
     public TranslationPipeline(IScreenCaptureService screenCaptureService, IOcrEngine ocrEngine,
-        ITranslationProvider translationProvider, ITranslationCacheRepository cacheRepository, TimeProvider? timeProvider = null)
+        ITranslationProvider translationProvider, ITranslationCacheRepository cacheRepository, TimeProvider? timeProvider = null,
+        PerformanceDiagnostics? diagnostics = null)
     {
         _capture = screenCaptureService;
         _ocr = ocrEngine;
@@ -49,6 +59,7 @@ public sealed class TranslationPipeline : IDisposable
         _cache = cacheRepository;
         _menus = new(translationProvider, cacheRepository);
         _clock = timeProvider ?? TimeProvider.System;
+        Diagnostics = diagnostics ?? new();
         _tracker = new(_clock);
         _worker = Task.Run(ProcessQueueAsync);
     }
@@ -79,6 +90,7 @@ public sealed class TranslationPipeline : IDisposable
             }
             Settings = snapshot;
             _tracker.Settings = snapshot;
+            Diagnostics.Enabled = snapshot.PerformanceDiagnostics;
         }
     }
 
@@ -89,6 +101,8 @@ public sealed class TranslationPipeline : IDisposable
         await _detectionLock.WaitAsync(cancellationToken);
         try
         {
+            Diagnostics.SampleResources();
+            var captureStarted = Stopwatch.GetTimestamp();
             long generation;
             lock (_gate)
             {
@@ -100,22 +114,33 @@ public sealed class TranslationPipeline : IDisposable
             OcrResult? ocr = null;
             var failed = false;
             string? error = null;
+            var freshOcr = false;
             try
             {
-                using var bitmap = await _capture.CaptureAsync(region, cancellationToken);
-                var fingerprint = ImageFingerprint.Compute(bitmap);
+                System.Drawing.Bitmap bitmap;
+                using (Diagnostics.Measure(LatencyStage.Capture)) bitmap = await _capture.CaptureAsync(region, cancellationToken);
+                using var captured = bitmap;
+                string? fingerprint = null;
+                ulong? visual = null;
+                if (listMode)
+                { using (Diagnostics.Measure(LatencyStage.Fingerprint)) fingerprint = ImageFingerprint.Compute(bitmap); }
+                else
+                { using (Diagnostics.Measure(LatencyStage.TextChangeDetection)) visual = SubtitleVisualSignature.Compute(bitmap); }
                 var now = _clock.GetTimestamp();
                 lock (_gate)
                 {
-                    // Recheck even identical successful frames every 400 ms.
-                    // Empty/failed OCR never becomes a reusable fingerprint.
-                    if (_fingerprint == fingerprint && _successfulOcr is not null
-                        && _clock.GetElapsedTime(_lastOcrAt, now).TotalMilliseconds < 400)
+                    var maximumReuse = listMode ? 400 : Settings.FastSubtitles ? 160 : 200;
+                    var unchangedVisual = listMode ? _fingerprint == fingerprint : _visualSignature == visual;
+                    // Masks schedule work; OCR still confirms candidate text and
+                    // periodically revalidates it, including weak/dark glyphs.
+                    if (unchangedVisual && _successfulOcr is not null && !_tracker.RequiresOcrConfirmation
+                        && _clock.GetElapsedTime(_lastOcrAt, now).TotalMilliseconds < maximumReuse)
                         ocr = _successfulOcr;
                 }
                 if (ocr is null)
                 {
                     ocr = await _ocr.RecognizeAsync(bitmap, sourceLanguage, cancellationToken, listMode ? "list" : "dialogue");
+                    freshOcr = true;
                     lock (_gate)
                     {
                         if (generation == _tracker.Sequence)
@@ -123,6 +148,7 @@ public sealed class TranslationPipeline : IDisposable
                             _lastOcrAt = now;
                             _successfulOcr = string.IsNullOrWhiteSpace(ocr.Text) ? null : ocr;
                             _fingerprint = _successfulOcr is null ? null : fingerprint;
+                            _visualSignature = _successfulOcr is null ? null : visual;
                         }
                     }
                 }
@@ -153,7 +179,8 @@ public sealed class TranslationPipeline : IDisposable
                 else if (_clock.GetElapsedTime(_lastNonemptyAt, now).TotalMilliseconds >= Math.Clamp(Settings.SceneResetMilliseconds, 1000, 60000))
                 { _history.Clear(); _historyText = null; }
 
-                var observation = _tracker.Observe(text, failed);
+                text = OcrTextCanonicalizer.Normalize(text);
+                var observation = _tracker.Observe(text, failed, freshOcr);
                 if (observation.Changed || (observation.Clear && _queuedSequence != -1))
                 {
                     CancelCurrent();
@@ -161,6 +188,8 @@ public sealed class TranslationPipeline : IDisposable
                     _retryAt = 0;
                     _consecutiveFailures = 0;
                     _requestContext = null;
+                    _observedAt = captureStarted;
+                    _recognizedAt = Stopwatch.GetTimestamp();
                     _result = Empty(error ?? "Waiting for stable dialogue.") with { Sequence = observation.Sequence };
                 }
                 if (_current?.IsCancellationRequested == true)
@@ -171,9 +200,13 @@ public sealed class TranslationPipeline : IDisposable
                     _current = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
                     var context = _requestContext ??= _context with { GameKey = _context.GameKey + ":" + _capture.CacheIdentity, RecentDialogue = _history.ToArray() };
                     var kind = listMode ? TranslationContentKind.UiLabel : TranslationContentKind.GameDialogue;
-                    var cacheId = $"{_provider.Id}:{kind}:story-v3:{context.CacheScope}";
+                    var cacheId = _provider.UsesHistoricalContext
+                        ? $"{_provider.Id}:{kind}:story-v3:{context.CacheScope}"
+                        : $"{_provider.Id}:{kind}:offline-v4:{context.OfflineCacheScope}";
+                    var queuedAt = Stopwatch.GetTimestamp();
+                    Diagnostics.Elapsed(LatencyStage.Stabilization, _recognizedAt, queuedAt);
                     _queue.Writer.TryWrite(new(observation.Sequence, ocr, text, sourceLanguage, targetLanguage,
-                        listMode, context, _provider.Id, cacheId, _current.Token));
+                        listMode, context, _provider.Id, cacheId, _current.Token, _observedAt, queuedAt));
                     _queuedSequence = observation.Sequence;
                     if (!listMode && _historyText != text)
                     {
@@ -199,27 +232,37 @@ public sealed class TranslationPipeline : IDisposable
                 try
                 {
                     work.Token.ThrowIfCancellationRequested();
+                    Diagnostics.Elapsed(LatencyStage.QueueWait, work.QueuedAt);
                     if (_provider.Id != work.ProviderId) continue;
                     PipelineResult result;
+                    string? cacheValue = null;
                     if (work.ListMode)
                         result = await _menus.TranslateAsync(work.CacheId, work.Ocr, work.Source, work.Target, work.Context, work.Token);
                     else
                     {
-                        var cached = await _cache.GetAsync(work.Text, work.Source, work.Target, work.CacheId, work.Token);
+                        string? cached;
+                        using (Diagnostics.Measure(LatencyStage.CacheLookup))
+                            cached = await _cache.GetAsync(work.Text, work.Source, work.Target, work.CacheId, work.Token);
                         var translated = cached ?? await _provider.TranslateStoryAsync(work.Text, work.Source, work.Target, work.Context, work.Token);
                         if (string.IsNullOrWhiteSpace(translated))
                             throw new TranslationProviderException("Translation returned empty text. Retrying.", "empty translation");
                         work.Token.ThrowIfCancellationRequested();
-                        if (cached is null) await _cache.SaveAsync(work.Text, work.Source, work.Target, work.CacheId, translated, work.Token);
+                        if (cached is null) cacheValue = translated;
                         result = new(work.Text, translated, cached is null ? "Translated." : "Loaded from cache.", cached is not null, false);
                     }
                     lock (_gate)
                     {
                         if (_disposed || work.Token.IsCancellationRequested || work.Sequence != _tracker.Sequence || _provider.Id != work.ProviderId) continue;
-                        _result = result with { Sequence = work.Sequence, ClearOverlay = result.TranslatedText.Length == 0 };
+                        result = _result = result with { Sequence = work.Sequence, ClearOverlay = result.TranslatedText.Length == 0,
+                            ObservedTimestamp = work.ObservedAt, CompletedTimestamp = Stopwatch.GetTimestamp() };
                         if (result.TranslatedText.Length == 0) { ScheduleRetry(); continue; }
                         _consecutiveFailures = 0;
                     }
+                    // Publish immediately instead of waiting for the next OCR
+                    // turn or SQLite write. Persistence remains bounded/serial.
+                    NotifyResult(result);
+                    if (cacheValue is not null)
+                        await _cache.SaveAsync(work.Text, work.Source, work.Target, work.CacheId, cacheValue, work.Token);
                 }
                 catch (OperationCanceledException) when (work.Token.IsCancellationRequested || _lifetime.IsCancellationRequested) { }
                 catch (Exception ex)
@@ -235,6 +278,15 @@ public sealed class TranslationPipeline : IDisposable
             }
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+    }
+
+    private void NotifyResult(PipelineResult result)
+    {
+        foreach (var handler in ResultAvailable?.GetInvocationList() ?? [])
+        {
+            try { ((Action<PipelineResult>)handler)(result); }
+            catch (Exception ex) { AppLog.Write("overlay-publication", ex); }
+        }
     }
 
     private void ScheduleRetry()
@@ -259,6 +311,7 @@ public sealed class TranslationPipeline : IDisposable
         _retryAt = 0;
         _fingerprint = null;
         _successfulOcr = null;
+        _visualSignature = null;
         _history.Clear();
         _historyText = null;
         _requestContext = null;

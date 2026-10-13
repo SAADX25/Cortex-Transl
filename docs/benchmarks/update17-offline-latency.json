@@ -1,0 +1,548 @@
+{
+  "BaselineCommit": "e99fd23 (Update-17)",
+  "Scope": "controlled WPF animated source, real WGC/OCR/Bergamot/OverlayWindow; not a browser/game or physical display scanout measurement",
+  "baseline": {
+    "Stages": {
+      "GpuCopyReadback": {
+        "Count": 512,
+        "P50": 1.9257,
+        "P95": 2.9462,
+        "Maximum": 6.702
+      },
+      "ModelInitialization": {
+        "Count": 1,
+        "P50": 103.2797,
+        "P95": 103.2797,
+        "Maximum": 103.2797
+      },
+      "NativeWarmup": {
+        "Count": 1,
+        "P50": 162.8999,
+        "P95": 162.8999,
+        "Maximum": 162.8999
+      },
+      "WorkingSetMiB": {
+        "Count": 17,
+        "P50": 398.06640625,
+        "P95": 404.0390625,
+        "Maximum": 404.0390625
+      },
+      "PrivateMemoryMiB": {
+        "Count": 17,
+        "P50": 591.56640625,
+        "P95": 596.5078125,
+        "Maximum": 596.5078125
+      },
+      "Capture": {
+        "Count": 174,
+        "P50": 0.984,
+        "P95": 2.4026,
+        "Maximum": 3.3191
+      },
+      "Fingerprint": {
+        "Count": 174,
+        "P50": 1.8605,
+        "P95": 2.8866,
+        "Maximum": 5.4052
+      },
+      "Preprocess": {
+        "Count": 174,
+        "P50": 7.5051,
+        "P95": 12.5807,
+        "Maximum": 23.749
+      },
+      "WindowsOcr": {
+        "Count": 174,
+        "P50": 6.0234,
+        "P95": 8.1251,
+        "Maximum": 16.7875
+      },
+      "Stabilization": {
+        "Count": 35,
+        "P50": 0.1139,
+        "P95": 381.7213,
+        "Maximum": 385.2146
+      },
+      "QueueWait": {
+        "Count": 35,
+        "P50": 0.0695,
+        "P95": 0.2378,
+        "Maximum": 0.7756
+      },
+      "CacheLookup": {
+        "Count": 35,
+        "P50": 0.2505,
+        "P95": 10.4228,
+        "Maximum": 13.6289
+      },
+      "NativeInference": {
+        "Count": 29,
+        "P50": 8.6151,
+        "P95": 23.6579,
+        "Maximum": 27.2155
+      },
+      "OverlayPublication": {
+        "Count": 24,
+        "P50": 6.8087,
+        "P95": 10.9991,
+        "Maximum": 68.4711
+      },
+      "OverlayRender": {
+        "Count": 24,
+        "P50": 14.8223,
+        "P95": 34.6745,
+        "Maximum": 87.57
+      },
+      "ControlledAppearanceToOverlayRender": {
+        "Count": 24,
+        "P50": 414.8003,
+        "P95": 698.5772,
+        "Maximum": 1068.0158
+      },
+      "CpuPercentOfMachine": {
+        "Count": 16,
+        "P50": 10.37010862716274,
+        "P95": 15.243384705875387,
+        "Maximum": 15.243384705875387
+      },
+      "GpuBusiestEnginePercent": {
+        "Count": 16,
+        "P50": 5.856084879502962,
+        "P95": 7.065683073914594,
+        "Maximum": 7.065683073914594
+      },
+      "OcrRecovery": {
+        "Count": 5,
+        "P50": 7.4429,
+        "P95": 10.8433,
+        "Maximum": 10.8433
+      }
+    },
+    "Readings": [
+      {
+        "Index": 0,
+        "Milliseconds": 1068.0158,
+        "CorrectOcr": true,
+        "Arabic": "Cr-cr-Cry \u0645\u0646\u0630 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0630\u064A \u0627\u0641\u062A\u0631\u0649"
+      },
+      {
+        "Index": 1,
+        "Milliseconds": 509.5402,
+        "CorrectOcr": true,
+        "Arabic": "\u0627\u0631\u0643\u0636!"
+      },
+      {
+        "Index": 2,
+        "Milliseconds": 400.85,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627!"
+      },
+      {
+        "Index": 3,
+        "Milliseconds": 286.1117,
+        "CorrectOcr": true,
+        "Arabic": "\u0633\u0627\u0639\u062F\u0646\u064A!"
+      },
+      {
+        "Index": 4,
+        "Milliseconds": 415.8927,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627 \u0623\u0633\u062A\u0637\u064A\u0639 \u0645\u0633\u0627\u0639\u062F\u062A\u0643"
+      },
+      {
+        "Index": 5,
+        "Milliseconds": 430.8289,
+        "CorrectOcr": true,
+        "Arabic": "\u064A\u062C\u0628 \u0623\u0646 \u0646\u0635\u0644 \u0625\u0644\u0649 \u0627\u0644\u062C\u0633\u0631 \u0642\u0628\u0644 \u0623\u0646 \u064A\u0645\u0633\u0643\u0646\u0627 \u0627\u0644\u0639\u062F\u0648!"
+      },
+      {
+        "Index": 6,
+        "Milliseconds": 668.9901,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0646 \u0623\u062A\u0631\u0643\u0643 \u0623\u0628\u062F\u0627\u064B"
+      },
+      {
+        "Index": 7,
+        "Milliseconds": 270.0272,
+        "CorrectOcr": true,
+        "Arabic": "\u0625\u0646\u0647 \u062D\u064A\u0651."
+      },
+      {
+        "Index": 8,
+        "Milliseconds": 667.2346,
+        "CorrectOcr": true,
+        "Arabic": "Cr-cr-Cry \u0645\u0646\u0630 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0630\u064A \u0627\u0641\u062A\u0631\u0649"
+      },
+      {
+        "Index": 9,
+        "Milliseconds": 416.0759,
+        "CorrectOcr": true,
+        "Arabic": "\u0627\u0631\u0643\u0636!"
+      },
+      {
+        "Index": 10,
+        "Milliseconds": 670.9642,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627!"
+      },
+      {
+        "Index": 11,
+        "Milliseconds": 259.6625,
+        "CorrectOcr": true,
+        "Arabic": "\u0633\u0627\u0639\u062F\u0646\u064A!"
+      },
+      {
+        "Index": 12,
+        "Milliseconds": 410.6726,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627 \u0623\u0633\u062A\u0637\u064A\u0639 \u0645\u0633\u0627\u0639\u062F\u062A\u0643"
+      },
+      {
+        "Index": 13,
+        "Milliseconds": 421.9585,
+        "CorrectOcr": true,
+        "Arabic": "\u064A\u062C\u0628 \u0623\u0646 \u0646\u0635\u0644 \u0625\u0644\u0649 \u0627\u0644\u062C\u0633\u0631 \u0642\u0628\u0644 \u0623\u0646 \u064A\u0645\u0633\u0643\u0646\u0627 \u0627\u0644\u0639\u062F\u0648!"
+      },
+      {
+        "Index": 14,
+        "Milliseconds": 619.2086,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0646 \u0623\u062A\u0631\u0643\u0643 \u0623\u0628\u062F\u0627\u064B"
+      },
+      {
+        "Index": 15,
+        "Milliseconds": 285.2783,
+        "CorrectOcr": true,
+        "Arabic": "\u0625\u0646\u0647 \u062D\u064A\u0651."
+      },
+      {
+        "Index": 16,
+        "Milliseconds": 698.5772,
+        "CorrectOcr": true,
+        "Arabic": "Cr-cr-Cry \u0645\u0646\u0630 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0630\u064A \u0627\u0641\u062A\u0631\u0649"
+      },
+      {
+        "Index": 17,
+        "Milliseconds": 271.7522,
+        "CorrectOcr": true,
+        "Arabic": "\u0627\u0631\u0643\u0636!"
+      },
+      {
+        "Index": 18,
+        "Milliseconds": 280.486,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627!"
+      },
+      {
+        "Index": 19,
+        "Milliseconds": 294.4201,
+        "CorrectOcr": true,
+        "Arabic": "\u0633\u0627\u0639\u062F\u0646\u064A!"
+      },
+      {
+        "Index": 20,
+        "Milliseconds": 404.5427,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627 \u0623\u0633\u062A\u0637\u064A\u0639 \u0645\u0633\u0627\u0639\u062F\u062A\u0643"
+      },
+      {
+        "Index": 21,
+        "Milliseconds": 414.8003,
+        "CorrectOcr": true,
+        "Arabic": "\u064A\u062C\u0628 \u0623\u0646 \u0646\u0635\u0644 \u0625\u0644\u0649 \u0627\u0644\u062C\u0633\u0631 \u0642\u0628\u0644 \u0623\u0646 \u064A\u0645\u0633\u0643\u0646\u0627 \u0627\u0644\u0639\u062F\u0648!"
+      },
+      {
+        "Index": 22,
+        "Milliseconds": 622.8493,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0646 \u0623\u062A\u0631\u0643\u0643 \u0623\u0628\u062F\u0627\u064B"
+      },
+      {
+        "Index": 23,
+        "Milliseconds": 289.9271,
+        "CorrectOcr": true,
+        "Arabic": "\u0625\u0646\u0647 \u062D\u064A\u0651."
+      }
+    ],
+    "Readbacks": 930,
+    "ReadbackBytes": 3428352000,
+    "StagingAllocations": 930,
+    "WallSeconds": 18.8806033,
+    "CpuSeconds": 24
+  },
+  "upgraded": {
+    "Stages": {
+      "ModelInitialization": {
+        "Count": 1,
+        "P50": 124.9683,
+        "P95": 124.9683,
+        "Maximum": 124.9683
+      },
+      "NativeWarmup": {
+        "Count": 1,
+        "P50": 185.6667,
+        "P95": 185.6667,
+        "Maximum": 185.6667
+      },
+      "WorkingSetMiB": {
+        "Count": 12,
+        "P50": 399.9296875,
+        "P95": 402.28515625,
+        "Maximum": 402.28515625
+      },
+      "PrivateMemoryMiB": {
+        "Count": 12,
+        "P50": 591.16015625,
+        "P95": 594.5625,
+        "Maximum": 594.5625
+      },
+      "FrameWait": {
+        "Count": 162,
+        "P50": 0.0001,
+        "P95": 0.0007,
+        "Maximum": 0.4275
+      },
+      "GpuCopyReadback": {
+        "Count": 159,
+        "P50": 0.6223,
+        "P95": 0.9749,
+        "Maximum": 2.1354
+      },
+      "Capture": {
+        "Count": 162,
+        "P50": 0.7148,
+        "P95": 1.1147,
+        "Maximum": 5.6387
+      },
+      "TextChangeDetection": {
+        "Count": 162,
+        "P50": 0.8164,
+        "P95": 1.2132,
+        "Maximum": 2.1298
+      },
+      "Preprocess": {
+        "Count": 158,
+        "P50": 0.3279,
+        "P95": 5.5012,
+        "Maximum": 6.5108
+      },
+      "WindowsOcr": {
+        "Count": 158,
+        "P50": 5.4248,
+        "P95": 7.4056,
+        "Maximum": 8.24
+      },
+      "Stabilization": {
+        "Count": 36,
+        "P50": 0.0642,
+        "P95": 185.0196,
+        "Maximum": 185.7478
+      },
+      "QueueWait": {
+        "Count": 36,
+        "P50": 0.0581,
+        "P95": 0.4041,
+        "Maximum": 0.792
+      },
+      "CacheLookup": {
+        "Count": 36,
+        "P50": 4.1408,
+        "P95": 11.1968,
+        "Maximum": 16.6664
+      },
+      "NativeInference": {
+        "Count": 10,
+        "P50": 8.1007,
+        "P95": 25.1942,
+        "Maximum": 25.1942
+      },
+      "OverlayDispatch": {
+        "Count": 24,
+        "P50": 10.9375,
+        "P95": 14.0543,
+        "Maximum": 14.278
+      },
+      "OverlayPublication": {
+        "Count": 24,
+        "P50": 6.1416,
+        "P95": 10.7386,
+        "Maximum": 11.1655
+      },
+      "OverlayRender": {
+        "Count": 24,
+        "P50": 13.2594,
+        "P95": 29.3355,
+        "Maximum": 29.593
+      },
+      "ControlledAppearanceToOverlayRender": {
+        "Count": 24,
+        "P50": 139.1266,
+        "P95": 316.5684,
+        "Maximum": 319.3255
+      },
+      "CpuPercentOfMachine": {
+        "Count": 11,
+        "P50": 7.67718055324834,
+        "P95": 10.514612579136019,
+        "Maximum": 10.514612579136019
+      },
+      "GpuBusiestEnginePercent": {
+        "Count": 11,
+        "P50": 4.549585225653339,
+        "P95": 5.218299927914376,
+        "Maximum": 5.218299927914376
+      }
+    },
+    "Readings": [
+      {
+        "Index": 0,
+        "Milliseconds": 319.3255,
+        "CorrectOcr": true,
+        "Arabic": "Cr-cr-Cry \u0645\u0646\u0630 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0630\u064A \u0627\u0641\u062A\u0631\u0649"
+      },
+      {
+        "Index": 1,
+        "Milliseconds": 126.7047,
+        "CorrectOcr": true,
+        "Arabic": "\u0627\u0631\u0643\u0636!"
+      },
+      {
+        "Index": 2,
+        "Milliseconds": 120.4729,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627!"
+      },
+      {
+        "Index": 3,
+        "Milliseconds": 126.0173,
+        "CorrectOcr": true,
+        "Arabic": "\u0633\u0627\u0639\u062F\u0646\u064A!"
+      },
+      {
+        "Index": 4,
+        "Milliseconds": 222.5379,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627 \u0623\u0633\u062A\u0637\u064A\u0639 \u0645\u0633\u0627\u0639\u062F\u062A\u0643"
+      },
+      {
+        "Index": 5,
+        "Milliseconds": 236.8784,
+        "CorrectOcr": true,
+        "Arabic": "\u064A\u062C\u0628 \u0623\u0646 \u0646\u0635\u0644 \u0625\u0644\u0649 \u0627\u0644\u062C\u0633\u0631 \u0642\u0628\u0644 \u0623\u0646 \u064A\u0645\u0633\u0643\u0646\u0627 \u0627\u0644\u0639\u062F\u0648!"
+      },
+      {
+        "Index": 6,
+        "Milliseconds": 307.8737,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0646 \u0623\u062A\u0631\u0643\u0643 \u0623\u0628\u062F\u0627\u064B"
+      },
+      {
+        "Index": 7,
+        "Milliseconds": 124.3918,
+        "CorrectOcr": true,
+        "Arabic": "\u0625\u0646\u0647 \u062D\u064A\u0651."
+      },
+      {
+        "Index": 8,
+        "Milliseconds": 305.7603,
+        "CorrectOcr": true,
+        "Arabic": "Cr-cr-Cry \u0645\u0646\u0630 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0630\u064A \u0627\u0641\u062A\u0631\u0649"
+      },
+      {
+        "Index": 9,
+        "Milliseconds": 130.7667,
+        "CorrectOcr": true,
+        "Arabic": "\u0627\u0631\u0643\u0636!"
+      },
+      {
+        "Index": 10,
+        "Milliseconds": 124.6045,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627!"
+      },
+      {
+        "Index": 11,
+        "Milliseconds": 120.0122,
+        "CorrectOcr": true,
+        "Arabic": "\u0633\u0627\u0639\u062F\u0646\u064A!"
+      },
+      {
+        "Index": 12,
+        "Milliseconds": 212.3902,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627 \u0623\u0633\u062A\u0637\u064A\u0639 \u0645\u0633\u0627\u0639\u062F\u062A\u0643"
+      },
+      {
+        "Index": 13,
+        "Milliseconds": 242.9426,
+        "CorrectOcr": true,
+        "Arabic": "\u064A\u062C\u0628 \u0623\u0646 \u0646\u0635\u0644 \u0625\u0644\u0649 \u0627\u0644\u062C\u0633\u0631 \u0642\u0628\u0644 \u0623\u0646 \u064A\u0645\u0633\u0643\u0646\u0627 \u0627\u0644\u0639\u062F\u0648!"
+      },
+      {
+        "Index": 14,
+        "Milliseconds": 300.716,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0646 \u0623\u062A\u0631\u0643\u0643 \u0623\u0628\u062F\u0627\u064B"
+      },
+      {
+        "Index": 15,
+        "Milliseconds": 124.8383,
+        "CorrectOcr": true,
+        "Arabic": "\u0625\u0646\u0647 \u062D\u064A\u0651."
+      },
+      {
+        "Index": 16,
+        "Milliseconds": 316.5684,
+        "CorrectOcr": true,
+        "Arabic": "Cr-cr-Cry \u0645\u0646\u0630 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0630\u064A \u0627\u0641\u062A\u0631\u0649"
+      },
+      {
+        "Index": 17,
+        "Milliseconds": 139.1266,
+        "CorrectOcr": true,
+        "Arabic": "\u0627\u0631\u0643\u0636!"
+      },
+      {
+        "Index": 18,
+        "Milliseconds": 125.2002,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627!"
+      },
+      {
+        "Index": 19,
+        "Milliseconds": 119.556,
+        "CorrectOcr": true,
+        "Arabic": "\u0633\u0627\u0639\u062F\u0646\u064A!"
+      },
+      {
+        "Index": 20,
+        "Milliseconds": 228.951,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0627 \u0623\u0633\u062A\u0637\u064A\u0639 \u0645\u0633\u0627\u0639\u062F\u062A\u0643"
+      },
+      {
+        "Index": 21,
+        "Milliseconds": 226.6139,
+        "CorrectOcr": true,
+        "Arabic": "\u064A\u062C\u0628 \u0623\u0646 \u0646\u0635\u0644 \u0625\u0644\u0649 \u0627\u0644\u062C\u0633\u0631 \u0642\u0628\u0644 \u0623\u0646 \u064A\u0645\u0633\u0643\u0646\u0627 \u0627\u0644\u0639\u062F\u0648!"
+      },
+      {
+        "Index": 22,
+        "Milliseconds": 298.151,
+        "CorrectOcr": true,
+        "Arabic": "\u0644\u0646 \u0623\u062A\u0631\u0643\u0643 \u0623\u0628\u062F\u0627\u064B"
+      },
+      {
+        "Index": 23,
+        "Milliseconds": 116.416,
+        "CorrectOcr": true,
+        "Arabic": "\u0625\u0646\u0647 \u062D\u064A\u0651."
+      }
+    ],
+    "Readbacks": 159,
+    "ReadbackBytes": 130252800,
+    "StagingAllocations": 1,
+    "WallSeconds": 11.7380491,
+    "CpuSeconds": 10.796875
+  }
+}

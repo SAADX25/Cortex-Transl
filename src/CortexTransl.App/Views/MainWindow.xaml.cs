@@ -8,6 +8,7 @@ using CortexTransl.App.Services.Profiles;
 using CortexTransl.App.Services.Settings;
 using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
+using CortexTransl.App.Services.Diagnostics;
 using CortexTransl.App.ViewModels;
 using System.Windows;
 using System.Windows.Input;
@@ -31,17 +32,18 @@ public partial class MainWindow : Window
         var paths = AppDataPaths.CreateDefault();
         var connectionFactory = new SqliteConnectionFactory(paths.DatabasePath);
         var translationSettings = new TranslationProviderSettings();
-        _screenCapture = new ScreenCaptureService();
+        var diagnostics = new PerformanceDiagnostics();
+        _screenCapture = new ScreenCaptureService(diagnostics);
         var offlineInstaller = new OfflineModelInstaller(paths.ModelsDirectory, paths.BundledModelsDirectory);
-        var offlineProvider = new OfflineBergamotTranslationProvider(offlineInstaller);
+        var offlineProvider = new OfflineBergamotTranslationProvider(offlineInstaller, diagnostics);
         var pipeline = new TranslationPipeline(
             _screenCapture,
-            new WindowsOcrEngine(),
+            new WindowsOcrEngine(diagnostics),
             new RoutingTranslationProvider(
                 translationSettings,
                 offlineProvider,
                 new DeepLTranslationProvider(translationSettings)),
-            new SqliteTranslationCacheRepository(connectionFactory));
+            new SqliteTranslationCacheRepository(connectionFactory), diagnostics: diagnostics);
 
         _viewModel = new PlayViewModel(
             new DatabaseMigrator(connectionFactory),

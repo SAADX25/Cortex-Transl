@@ -10,15 +10,21 @@ using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
 using Windows.Storage.Streams;
 using WinRT;
+using System.Diagnostics;
+using CortexTransl.App.Services.Diagnostics;
 
 namespace CortexTransl.App.Services.Ocr;
 
 public sealed class WindowsOcrEngine : IOcrEngine
 {
+    private readonly PerformanceDiagnostics _diagnostics;
+    private readonly Dictionary<string, OcrEngine> _engines = new(StringComparer.OrdinalIgnoreCase);
+    private int _emptyReadings;
+    private long _lastRecoveryAt;
+    private SubtitleVisualSignature.Signature? _failedSignature;
+    public WindowsOcrEngine(PerformanceDiagnostics? diagnostics = null) { _diagnostics = diagnostics ?? new(); }
     private string? _engineLanguage;
     private OcrEngine? _engine;
-    private DateTimeOffset _nextRecoveryPass;
-    private string? _recoveryFingerprint;
     public string Id => "windows";
 
     public async Task<OcrResult> RecognizeAsync(
@@ -38,12 +44,29 @@ public sealed class WindowsOcrEngine : IOcrEngine
             // unnecessary enlargement. Start with original pixels, then adapt
             // only when recognition is empty.
             var preset = captureKind.Equals("list", StringComparison.OrdinalIgnoreCase) && useSmallText ? "small-text" : "original";
-            using var preprocessed = OcrImagePreprocessor.Preprocess(bitmap, preset);
-            using var softwareBitmap = await ToSoftwareBitmapAsync(preprocessed.Bitmap, cancellationToken);
+            OcrPreprocessedImage? prepared;
+            SoftwareBitmap software;
+            using (_diagnostics.Measure(LatencyStage.Preprocess))
+            {
+                prepared = preset == "original" && Math.Max(bitmap.Width, bitmap.Height) <= OcrEngine.MaxImageDimension
+                    ? null : OcrImagePreprocessor.Preprocess(bitmap, preset);
+                try { software = await ToSoftwareBitmapAsync(prepared?.Bitmap ?? bitmap, cancellationToken); }
+                catch { prepared?.Dispose(); throw; }
+            }
+            using var preprocessed = prepared;
+            using var softwareBitmap = software;
 
             if (_engineLanguage != sourceLanguage || _engine is null)
             {
-                _engine = CreateEngine(sourceLanguage);
+                if (!_engines.TryGetValue(sourceLanguage, out _engine))
+                {
+                    _engine = CreateEngine(sourceLanguage);
+                    if (_engine is not null)
+                    {
+                        if (_engines.Count == 4) _engines.Remove(_engines.Keys.First());
+                        _engines[sourceLanguage] = _engine;
+                    }
+                }
                 _engineLanguage = sourceLanguage;
             }
             var engine = _engine;
@@ -52,38 +75,66 @@ public sealed class WindowsOcrEngine : IOcrEngine
                 throw new InvalidOperationException($"Windows OCR for {sourceLanguage} is unavailable. Install that Windows language's OCR feature.");
             }
 
-            var result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
-            var recognized = ToOcrResult(result, preprocessed.Scale, bitmap.Width, bitmap.Height, sourceLanguage,
+            Windows.Media.Ocr.OcrResult result;
+            using (_diagnostics.Measure(LatencyStage.WindowsOcr))
+                result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
+            var recognized = ToOcrResult(result, preprocessed?.Scale ?? 1, bitmap.Width, bitmap.Height, sourceLanguage,
                 captureKind.Equals("list", StringComparison.OrdinalIgnoreCase));
             if (string.IsNullOrWhiteSpace(recognized.Text))
             {
-                var fingerprint = ImageFingerprint.Compute(bitmap);
+                _emptyReadings++;
+                var signature = SubtitleVisualSignature.Analyze(bitmap);
+                var now = Stopwatch.GetTimestamp();
+                var elapsed = _lastRecoveryAt == 0 ? double.MaxValue : Stopwatch.GetElapsedTime(_lastRecoveryAt, now).TotalMilliseconds;
+                var cueChanged = _failedSignature is null ||
+                    Math.Abs(signature.LightPixels - _failedSignature.Value.LightPixels) + Math.Abs(signature.DarkPixels - _failedSignature.Value.DarkPixels)
+                    >= Math.Max(32, bitmap.Width * (double)bitmap.Height * .0005);
+                var recoveryInterval = Math.Min(1000, 125 * (1 << Math.Min(Math.Max(_emptyReadings - 2, 0), 3)));
                 // The throttle applies only to repeated failed images. A new short
                 // line must get its own recovery passes immediately.
-                if (_recoveryFingerprint != fingerprint || DateTimeOffset.UtcNow >= _nextRecoveryPass)
+                if (_emptyReadings <= 2 || elapsed >= recoveryInterval || (cueChanged && elapsed >= 80))
                 {
-                    _recoveryFingerprint = fingerprint;
-                    _nextRecoveryPass = DateTimeOffset.UtcNow.AddSeconds(1);
-                    using var recovery = OcrImagePreprocessor.Preprocess(bitmap, "reduced-text");
-                    using var recoveryBitmap = await ToSoftwareBitmapAsync(recovery.Bitmap, cancellationToken);
-                    var retry = await engine.RecognizeAsync(recoveryBitmap).AsTask(cancellationToken);
-                    recognized = ToOcrResult(retry, recovery.Scale, bitmap.Width, bitmap.Height, sourceLanguage,
-                        captureKind.Equals("list", StringComparison.OrdinalIgnoreCase), recovery.OffsetX, recovery.OffsetY);
+                    _lastRecoveryAt = now; _failedSignature = signature;
+                    using var recoveryTiming = _diagnostics.Measure(LatencyStage.OcrRecovery);
+                    recognized = await RecognizeRecoveryAsync(engine, bitmap, "reduced-text", sourceLanguage, captureKind, cancellationToken);
                     if (string.IsNullOrWhiteSpace(recognized.Text))
                     {
-                        using var enlarged = OcrImagePreprocessor.Preprocess(bitmap, "auto-recovery");
-                        using var enlargedBitmap = await ToSoftwareBitmapAsync(enlarged.Bitmap, cancellationToken);
-                        var lastAttempt = await engine.RecognizeAsync(enlargedBitmap).AsTask(cancellationToken);
-                        recognized = ToOcrResult(lastAttempt, enlarged.Scale, bitmap.Width, bitmap.Height, sourceLanguage,
-                            captureKind.Equals("list", StringComparison.OrdinalIgnoreCase), enlarged.OffsetX, enlarged.OffsetY);
+                        recognized = await RecognizeRecoveryAsync(engine, bitmap, "auto-recovery", sourceLanguage, captureKind, cancellationToken);
+                    }
+                    if (string.IsNullOrWhiteSpace(recognized.Text) && signature.LightPixels >= 16)
+                    {
+                        // Outline/glow can confuse native segmentation even when
+                        // resized. Isolate bright strokes without changing words.
+                        recognized = await RecognizeRecoveryAsync(engine, bitmap, "caption-strokes", sourceLanguage, captureKind, cancellationToken);
                     }
                 }
             }
+            if (!string.IsNullOrWhiteSpace(recognized.Text)) { _emptyReadings = 0; _failedSignature = null; }
             return recognized;
         }
         catch (OperationCanceledException)
         {
             throw;
+        }
+    }
+
+    private async Task<OcrResult> RecognizeRecoveryAsync(OcrEngine engine, Bitmap bitmap, string preset,
+        string language, string kind, CancellationToken token)
+    {
+        OcrPreprocessedImage image;
+        SoftwareBitmap software;
+        using (_diagnostics.Measure(LatencyStage.Preprocess))
+        {
+            image = OcrImagePreprocessor.Preprocess(bitmap, preset);
+            try { software = await ToSoftwareBitmapAsync(image.Bitmap, token); }
+            catch { image.Dispose(); throw; }
+        }
+        using (image)
+        using (software)
+        {
+            Windows.Media.Ocr.OcrResult result;
+            using (_diagnostics.Measure(LatencyStage.WindowsOcr)) result = await engine.RecognizeAsync(software).AsTask(token);
+            return ToOcrResult(result, image.Scale, bitmap.Width, bitmap.Height, language, kind == "list", image.OffsetX, image.OffsetY);
         }
     }
 

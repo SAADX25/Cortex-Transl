@@ -10,6 +10,8 @@ public sealed record PipelineResult(
 {
     public long Sequence { get; init; }
     public bool ClearOverlay { get; init; }
+    public long ObservedTimestamp { get; init; }
+    public long CompletedTimestamp { get; init; }
     public PipelineResult(
         string originalText,
         string translatedText,

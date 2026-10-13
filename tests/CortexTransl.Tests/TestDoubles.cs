@@ -32,6 +32,8 @@ internal sealed class FakeCapture : IScreenCaptureService
         var bitmap = new Bitmap(64, 32, PixelFormat.Format32bppArgb);
         if (!SameFrame) _frame++;
         bitmap.SetPixel(3, 4, Color.FromArgb(_frame & 255, (_frame >> 8) & 255, 100));
+        for (var bit = 0; bit < 16; bit++)
+            if ((_frame & (1 << bit)) != 0) bitmap.SetPixel(8 + bit, 8, Color.White);
         return Task.FromResult(bitmap);
     }
     public void Dispose() { }

@@ -139,3 +139,10 @@ The following inventory includes application changes, new extracted components, 
 - `tests/CortexTransl.Tests/PipelineTests.cs`
 - `tests/CortexTransl.Tests/TestDoubles.cs`
 - `tests/CortexTransl.Tests/WindowsOcrTests.cs`
+
+## Subsequent offline latency measurements
+
+The [offline subtitle latency report](OFFLINE_SUBTITLE_LATENCY.md) documents the
+Fast Subtitles changes and actual controlled Windows measurements after Update-17.
+The results above describe the earlier reliability work and retain its original
+verification limits.

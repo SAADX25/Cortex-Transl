@@ -522,6 +522,11 @@
                                 <Expander Header="Story context and subtitle timing" Margin="0,4,0,12"
                                           Foreground="{DynamicResource PrimaryTextBrush}">
                                     <StackPanel Margin="0,10,0,0">
+                                        <CheckBox Content="Fast Subtitles — 80 ms capture, 150 ms unpunctuated confirmation"
+                                                  IsChecked="{Binding FastSubtitles}" Margin="0,0,0,8" />
+                                        <CheckBox Content="Optional latency diagnostics (numbers only)"
+                                                  IsChecked="{Binding PerformanceDiagnosticsEnabled}" Margin="0,0,0,8" />
+                                        <Button Content="Save P50/P95 latency report" Command="{Binding ExportPerformanceCommand}" Margin="0,0,0,10" />
                                         <TextBlock Text="Optional facts apply to this preset. Leave the speaker blank when unknown. DeepL receives these facts with recent dialogue. Offline mode uses exact glossary matches."
                                                    Style="{StaticResource HintText}" Margin="0,0,0,8" />
                                         <TextBlock Text="Current speaker (optional)" Style="{StaticResource InputLabel}" />

@@ -2,6 +2,11 @@ namespace CortexTransl.App.Models;
 
 public sealed class StorySettings
 {
+    public bool FastSubtitles { get; set; }
+    public bool PerformanceDiagnostics { get; set; }
+    public int EffectiveCaptureInterval => FastSubtitles ? 80 : Math.Clamp(CaptureIntervalMilliseconds, 50, 500);
+    public int EffectiveStability => FastSubtitles ? 150 : Math.Clamp(StabilityMilliseconds, 100, 2000);
+    public int EffectiveCompletedStability => FastSubtitles ? 50 : Math.Clamp(CompletedStabilityMilliseconds, 0, 500);
     public string Speaker { get; set; } = string.Empty;
     public string SceneState { get; set; } = string.Empty;
     public Dictionary<string, string> Terminology { get; set; } = new(StringComparer.OrdinalIgnoreCase);
