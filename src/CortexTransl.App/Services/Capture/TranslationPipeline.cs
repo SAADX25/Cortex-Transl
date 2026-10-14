@@ -32,6 +32,8 @@ public sealed class TranslationPipeline : IDisposable
     private long _queuedSequence = -1, _retryAt, _lastOcrAt, _lastNonemptyAt;
     private string? _fingerprint, _sessionKey;
     private OcrResult? _successfulOcr;
+    private (string Text, CaptureRegion Bounds)[] _menuLayout = [];
+    private string _menuSignature = "";
     private PipelineResult _result = Empty("Waiting for text.");
     private StoryTranslationContext _context = new();
     private readonly Queue<StoryDialogue> _history = new();
@@ -45,6 +47,7 @@ public sealed class TranslationPipeline : IDisposable
     private long _observedAt;
     private long _recognizedAt;
     public PerformanceDiagnostics Diagnostics { get; }
+    internal Task Completion => _worker;
     public event Action<PipelineResult>? ResultAvailable;
     public PipelineResult LatestResult { get { lock (_gate) return _result; } }
 
@@ -120,6 +123,7 @@ public sealed class TranslationPipeline : IDisposable
             var failed = false;
             string? error = null;
             var freshOcr = false;
+            ulong? observedVisual = null;
             try
             {
                 System.Drawing.Bitmap bitmap;
@@ -131,6 +135,7 @@ public sealed class TranslationPipeline : IDisposable
                 { using (Diagnostics.Measure(LatencyStage.Fingerprint)) fingerprint = ImageFingerprint.Compute(bitmap); }
                 else
                 { using (Diagnostics.Measure(LatencyStage.TextChangeDetection)) visual = SubtitleVisualSignature.Compute(bitmap); }
+                observedVisual = visual;
                 var now = _clock.GetTimestamp();
                 lock (_gate)
                 {
@@ -178,14 +183,14 @@ public sealed class TranslationPipeline : IDisposable
                 if (generation != _tracker.Sequence) return Empty("Capture settings changed.") with { Sequence = _tracker.Sequence };
                 var text = ocr is null ? "" : DialogueTextAssembler.Assemble(ocr, sourceLanguage);
                 if (listMode && ocr is not null)
-                    text = string.Join("\n", ocr.Blocks.Select(b => $"{b.Text}@{b.Bounds}"));
+                    text = GetMenuSignature(ocr);
                 var now = _clock.GetTimestamp();
                 if (text.Length > 0) _lastNonemptyAt = now;
                 else if (_clock.GetElapsedTime(_lastNonemptyAt, now).TotalMilliseconds >= Math.Clamp(Settings.SceneResetMilliseconds, 1000, 60000))
                 { _history.Clear(); _historyText = null; }
 
-                text = OcrTextCanonicalizer.Normalize(text);
-                var observation = _tracker.Observe(text, failed, freshOcr);
+                var observation = _tracker.Observe(text, failed, freshOcr, observedVisual);
+                text = observation.Text;
                 if (observation.Changed || (observation.Clear && _queuedSequence != -1))
                 {
                     CancelCurrent();
@@ -206,8 +211,8 @@ public sealed class TranslationPipeline : IDisposable
                     var context = _requestContext ??= _context with { GameKey = _context.GameKey + ":" + _capture.CacheIdentity, RecentDialogue = _history.ToArray() };
                     var kind = listMode ? TranslationContentKind.UiLabel : TranslationContentKind.GameDialogue;
                     var cacheId = _provider.UsesHistoricalContext
-                        ? $"{_provider.Id}:{kind}:story-v3:{context.CacheScope}"
-                        : $"{_provider.Id}:{kind}:offline-v4:{context.OfflineCacheScope}";
+                        ? $"{_provider.Id}:{kind}:story-v4:{context.CacheScope}"
+                        : $"{_provider.Id}:{kind}:offline-v5:{context.OfflineCacheScope}";
                     var queuedAt = Stopwatch.GetTimestamp();
                     Diagnostics.Elapsed(LatencyStage.Stabilization, _recognizedAt, queuedAt);
                     _queue.Writer.TryWrite(new(observation.Sequence, ocr, text, sourceLanguage, targetLanguage,
@@ -294,6 +299,32 @@ public sealed class TranslationPipeline : IDisposable
         }
     }
 
+    private string GetMenuSignature(OcrResult ocr)
+    {
+        var layout = ocr.Blocks.Where(block => !block.Bounds.IsEmpty)
+            .Select(block => (Text: OcrTextCanonicalizer.Normalize(block.Text), block.Bounds))
+            .Where(block => block.Text.Length > 0)
+            .OrderBy(block => block.Text, StringComparer.Ordinal)
+            .ThenBy(block => block.Bounds.Y).ThenBy(block => block.Bounds.X).ToArray();
+        if (layout.Length == 0) return "";
+        var same = layout.Length == _menuLayout.Length;
+        for (var index = 0; same && index < layout.Length; index++)
+        {
+            var previous = _menuLayout[index];
+            var current = layout[index];
+            same = previous.Text == current.Text
+                && Math.Abs(previous.Bounds.X - current.Bounds.X) <= 4
+                && Math.Abs(previous.Bounds.Y - current.Bounds.Y) <= 4
+                && Math.Abs(previous.Bounds.Width - current.Bounds.Width) <= 4
+                && Math.Abs(previous.Bounds.Height - current.Bounds.Height) <= 4;
+        }
+        if (same) return _menuSignature;
+        // Anchor tolerance to the last accepted layout, so real scrolling still
+        // moves the labels while one-pixel OCR jitter cannot starve translation.
+        _menuLayout = layout;
+        return _menuSignature = string.Join('\n', layout.Select(block => $"{block.Text}@{block.Bounds}"));
+    }
+
     private void ScheduleRetry()
     {
         _queuedSequence = -1;
@@ -316,6 +347,8 @@ public sealed class TranslationPipeline : IDisposable
         _retryAt = 0;
         _fingerprint = null;
         _successfulOcr = null;
+        _menuLayout = [];
+        _menuSignature = "";
         _visualSignature = null;
         _history.Clear();
         _historyText = null;

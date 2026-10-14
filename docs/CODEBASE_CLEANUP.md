@@ -187,7 +187,14 @@ Verified source findings:
   this user's case. See [NVIDIA's protected-content recording article](https://nvidia.custhelp.com/app/answers/detail/a_id/5602).
 - Windows border removal requires capability and consent, as described in the
   [IsBorderRequired documentation](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscapturesession.isborderrequired).
-  Production now retains the capture border; the frozen Update-17 benchmark is unchanged.
+  Current sessions set `IsBorderRequired = false` before starting capture,
+  with the borderless-access consent request running in the background
+  so it cannot stall OCR. Windows consent and system policy determine whether
+  the request is honored; rejection leaves capture operational with its border.
+- Menu stability compares normalized labels with a four-pixel rectangle tolerance.
+  One-pixel OCR jitter no longer cancels pending translations; larger movements
+  still update overlay positions. The real menu integration check covers WGC,
+  Windows OCR, offline Arabic menu terminology, and rendered WPF label chips.
 - F8/F9/F10 are registered without modifiers. Both the global dispatch and local
   handlers reject modified chords such as Alt+F9. Physical coexistence with NVIDIA
   shortcuts still needs testing; registration failure is logged.

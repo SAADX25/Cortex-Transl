@@ -52,14 +52,16 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (context.TryExactArabicTerm(text, sourceLanguage, targetLanguage, out var term)) return term;
-        if (text.Length <= 350 && !text.Contains('\n'))
-            return await TranslateAsync(text, sourceLanguage, targetLanguage, cancellationToken, TranslationContentKind.GameDialogue);
-        var chunks = TranslationChunker.Split(text);
-        var translated = await TranslateManyAsync(chunks, sourceLanguage, targetLanguage, cancellationToken, TranslationContentKind.GameDialogue);
+        // Bergamot accepts a whole utterance and handles sentence boundaries.
+        // Feeding display lines or arbitrary 350-character slices loses context.
+        text = TextNormalizer.Normalize(text);
+        var protectedText = ProtectedStoryText.Create(text, sourceLanguage, targetLanguage, context, useXml: false);
+        var translated = await TranslateAsync(protectedText?.Text ?? text, sourceLanguage, targetLanguage,
+            cancellationToken, TranslationContentKind.GameDialogue);
         cancellationToken.ThrowIfCancellationRequested();
-        if (translated.Count != chunks.Count || translated.Any(string.IsNullOrWhiteSpace))
+        if (string.IsNullOrWhiteSpace(translated))
             throw new TranslationProviderException("Offline translation returned incomplete dialogue.", "offline incomplete result");
-        return TranslationChunker.Join(translated);
+        return protectedText?.ReadTranslation(translated) ?? translated;
     }
 
     public async Task EnsureReadyAsync(
@@ -139,7 +141,8 @@ public sealed class OfflineBergamotTranslationProvider : ITranslationProvider, I
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var text = useUiTerms ? ArabicUiLabels.Normalize(texts[index]) : texts[index];
-                    using (_diagnostics.Measure(LatencyStage.NativeInference)) results[index] = TranslateText(service, text);
+                    using (_diagnostics.Measure(LatencyStage.NativeInference))
+                        results[index] = ArabicTranslationCleaner.Clean(TranslateText(service, text), targetLanguage);
                     cancellationToken.ThrowIfCancellationRequested();
                 }
             }

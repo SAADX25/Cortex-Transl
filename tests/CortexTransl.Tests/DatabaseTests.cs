@@ -10,7 +10,7 @@ namespace CortexTransl.Tests;
 public sealed class DatabaseTests
 {
     [Fact]
-    public async Task LegacyDatabaseMigrationPreservesProfileAndCacheAndIsRepeatable()
+    public async Task LegacyMigrationPurgesStaleTranslationsPreservesProfilesAndIsRepeatable()
     {
         var directory = Path.Combine(Path.GetTempPath(), "CortexTransl-migration-" + Guid.NewGuid().ToString("N"));
         var factory = new SqliteConnectionFactory(Path.Combine(directory, "fixture.db"));
@@ -46,6 +46,9 @@ public sealed class DatabaseTests
         Assert.Equal(new CaptureRegion(10, 20, 600, 100), old.Region);
         Assert.Equal("medium", old.OverlayTextSize);
         Assert.Equal(650, old.Story.DisappearanceGraceMilliseconds);
+        Assert.Null(await cache.GetAsync("No!", "en", "ar", "offline"));
+        await cache.SaveAsync("No!", "en", "ar", "offline", "لا!");
+        await migration.InitializeAsync();
         Assert.Equal("لا!", await cache.GetAsync("No!", "en", "ar", "offline"));
         old.Story.Terminology["Silver Keep"] = "قلعة الفضة";
         old.Story.SpeakerNames["Alice"] = "أليس";
@@ -60,5 +63,34 @@ public sealed class DatabaseTests
         await cache.SaveAsync("No!", "en", "ar", "offline:GameDialogue:story-v3:game-A", "كلا!");
         Assert.Equal("لا!", await cache.GetAsync("No!", "en", "ar", "offline"));
         Assert.Equal("كلا!", await cache.GetAsync("No!", "en", "ar", "offline:GameDialogue:story-v3:game-A"));
+    }
+
+    [Fact]
+    public async Task CacheUsesMergedCanonicalTextAndRejectsRowsFromOlderWriters()
+    {
+        var factory = new SqliteConnectionFactory(Path.Combine(Path.GetTempPath(), "CortexTransl-cache-" + Guid.NewGuid().ToString("N"), "fixture.db"));
+        await new DatabaseMigrator(factory).InitializeAsync();
+        var cache = new SqliteTranslationCacheRepository(factory);
+        await cache.SaveAsync(" | We must\nleave! _ x ", "en", "ar", "provider", "يجب أن نغادر!");
+        Assert.Equal("يجب أن نغادر!", await cache.GetAsync("We must leave!", "en", "ar", "provider"));
+        Assert.Null(await cache.GetAsync("We must not leave!", "en", "ar", "provider"));
+        await using var connection = factory.CreateConnection();
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT SourceText FROM TranslationCache;";
+        Assert.Equal("We must leave!", await command.ExecuteScalarAsync());
+        command.CommandText = "UPDATE TranslationCache SET CacheVersion = 0, TranslatedText = 'corrupt';";
+        await command.ExecuteNonQueryAsync();
+        Assert.Null(await cache.GetAsync("We must leave!", "en", "ar", "provider"));
+        await cache.SaveAsync("We must leave!", "en", "ar", "provider", "غادر الآن!");
+        Assert.Equal("غادر الآن!", await cache.GetAsync("We must\nleave!", "en", "ar", "provider"));
+    }
+
+    [Fact]
+    public void TranslationHashesNormalizeWrappingButGeneralHashesRemainExact()
+    {
+        Assert.Equal(TextHasher.TranslationKey("Hello world!"), TextHasher.TranslationKey("| Hello\nworld! _ x"));
+        Assert.NotEqual(TextHasher.TranslationKey("I can go!"), TextHasher.TranslationKey("I can't go!"));
+        Assert.NotEqual(TextHasher.Sha256("a\nb"), TextHasher.Sha256("a b"));
     }
 }

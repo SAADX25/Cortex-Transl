@@ -220,11 +220,13 @@ public partial class MainWindow : Window
         WindowState = WindowState.Minimized;
     }
 
-    private void OnClosed(object? sender, EventArgs e)
+    private async void OnClosed(object? sender, EventArgs e)
     {
         _viewModel.MinimizeRequested -= OnMinimizeRequested;
         ResourceCleanup.Dispose(_hotkeyService, "hotkeys-shutdown");
         ResourceCleanup.Dispose(_viewModel, "viewmodel-shutdown");
-        ResourceCleanup.Dispose(_screenCapture, "capture-shutdown");
+        try { await _viewModel.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception ex) { AppLog.Write("viewmodel-async-shutdown", ex); }
+        finally { ResourceCleanup.Dispose(_screenCapture, "capture-shutdown"); }
     }
 }

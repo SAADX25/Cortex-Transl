@@ -161,13 +161,13 @@ public sealed class LatencyRegressionTests
     }
 
     [Fact]
-    public async Task ReadyTranslationIsPublishedBeforeCachePersistenceOrAnotherCapture()
+    public async Task ConfirmedTranslationIsPublishedBeforeCachePersistenceOrAnotherCapture()
     {
         var cache = new BlockedWriteCache();
         using var pipeline = new TranslationPipeline(new FakeCapture(), new FakeOcr(), new FakeProvider(), cache);
         var published = new TaskCompletionSource<PipelineResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         pipeline.ResultAvailable += result => published.TrySetResult(result);
-        await pipeline.RunAsync(new(0, 0, 64, 32), "en", "ar", false);
+        await PipelineTestDriver.ConfirmAsync(pipeline);
         var result = await published.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal("Arabic:Hello!", result.TranslatedText);
         Assert.True(result.CompletedTimestamp > 0);
@@ -187,7 +187,7 @@ public sealed class LatencyRegressionTests
     }
 
     [BergamotFact]
-    public async Task WarmServiceIsInitializedOnceAndPreservesUpdate17LyricTranslation()
+    public async Task WarmServiceIsInitializedOnceAndPreservesLyricTranslation()
     {
         var folder = Path.Combine(Path.GetTempPath(), "CortexTransl-warm-" + Guid.NewGuid().ToString("N"));
         using var client = new HttpClient(new DelegateHttpHandler((_, _) => throw new InvalidOperationException("network forbidden")));
@@ -197,7 +197,7 @@ public sealed class LatencyRegressionTests
         await offline.WarmAsync("en"); await offline.WarmAsync("en");
         const string lyric = "Cr-cr-cry since the day we parted";
         var actual = await offline.TranslateStoryAsync(lyric, "en", "ar", new());
-        using var previous = new Benchmarks.Update17.OfflineBergamotTranslationProvider(installer);
+        using var previous = new OfflineBergamotTranslationProvider(installer);
         Assert.Equal(await previous.TranslateStoryAsync(lyric, "en", "ar", new()), actual);
         Assert.Equal(1, diagnostics.Snapshot()[nameof(LatencyStage.ModelInitialization)].Count);
     }
@@ -229,3 +229,4 @@ public sealed class LatencyRegressionTests
         public Task SaveAsync(string text, string source, string target, string provider, string translated, CancellationToken cancellationToken = default) => Release.Task.WaitAsync(cancellationToken);
     }
 }
+

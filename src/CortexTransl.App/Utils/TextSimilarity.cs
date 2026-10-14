@@ -11,8 +11,8 @@ public static class TextSimilarity
 {
     public static DialogueStability Classify(string previous, string current)
     {
-        var first = TextNormalizer.Normalize(previous);
-        var second = TextNormalizer.Normalize(current);
+        var first = OcrTextCanonicalizer.Normalize(previous);
+        var second = OcrTextCanonicalizer.Normalize(current);
 
         if (first.Length == 0 && second.Length == 0)
         {
@@ -45,8 +45,8 @@ public static class TextSimilarity
             return false;
         }
 
-        var last = value[^1];
-        return last is '.' or '!' or '?' or '…' or '。' or '！' or '？' or '」' or '』';
+        value = value.TrimEnd('"', '\'', ')', ']', '}', '」', '』');
+        return value.Length > 0 && value[^1] is '.' or '!' or '?' or '؟' or '…' or '。' or '！' or '？';
     }
 
     private static bool IsProgressiveChange(string first, string second)

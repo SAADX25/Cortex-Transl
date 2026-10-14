@@ -68,7 +68,7 @@ public sealed class CleanupRegressionTests
         {
             Translate = (_, _) => { started.TrySetResult(); return delayed.Task; }
         }, cache);
-        await pipeline.RunAsync(new(0, 0, 64, 32), "en", "ar", false);
+        await PipelineTestDriver.ConfirmAsync(pipeline);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
         pipeline.StopCapture();
         Assert.Equal(1, capture.ReleasedSessions);
@@ -77,7 +77,7 @@ public sealed class CleanupRegressionTests
         pipeline.BindCapture(new(0, 0, 64, 32), false, onlyIfUnbound: true);
         var ready = new TaskCompletionSource<PipelineResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         pipeline.ResultAvailable += result => ready.TrySetResult(result);
-        await pipeline.RunAsync(new(0, 0, 64, 32), "en", "ar", false);
+        await PipelineTestDriver.ConfirmAsync(pipeline);
         var result = await ready.Task.WaitAsync(TimeSpan.FromSeconds(2));
         await cache.Saved.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(pipeline.CurrentSequence, result.Sequence);

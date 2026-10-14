@@ -19,14 +19,14 @@ public sealed record StoryTranslationContext
 
     public string CacheScope => TextHasher.Sha256(JsonSerializer.Serialize(new
     {
-        Version = 3, GameKey, Speaker, SceneState, RecentDialogue,
+        Version = 4, GameKey, Speaker, SceneState, RecentDialogue,
         Terms = Terminology.OrderBy(x => x.Key, StringComparer.Ordinal).ToArray(),
         Names = SpeakerNames.OrderBy(x => x.Key, StringComparer.Ordinal).ToArray(), DeepLGlossaryId
     }));
 
     public string OfflineCacheScope => TextHasher.Sha256(JsonSerializer.Serialize(new
     {
-        Version = 4, GameKey,
+        Version = 5, GameKey,
         Terms = Terminology.OrderBy(x => x.Key, StringComparer.Ordinal).ToArray(),
         Names = SpeakerNames.OrderBy(x => x.Key, StringComparer.Ordinal).ToArray()
     }));
@@ -47,8 +47,8 @@ public sealed record StoryTranslationContext
     public bool TryExactArabicTerm(string source, string sourceLanguage, string targetLanguage, out string value)
     {
         value = string.Empty;
-        if (!sourceLanguage.Equals("en", StringComparison.OrdinalIgnoreCase)
-            || !targetLanguage.Equals("ar", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!targetLanguage.Equals("ar", StringComparison.OrdinalIgnoreCase)
+            && !targetLanguage.StartsWith("ar-", StringComparison.OrdinalIgnoreCase)) return false;
         var normalizedSource = TextNormalizer.Normalize(source);
         foreach (var term in Terminology.Concat(SpeakerNames))
         {

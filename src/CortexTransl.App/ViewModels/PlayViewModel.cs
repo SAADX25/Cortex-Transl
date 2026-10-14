@@ -9,10 +9,11 @@ using CortexTransl.App.Utils;
 using System.Collections.ObjectModel;
 using CortexTransl.App.Services.Diagnostics;
 using System.IO;
+using System.Windows.Threading;
 
 namespace CortexTransl.App.ViewModels;
 
-public sealed partial class PlayViewModel : ObservableObject, IDisposable
+public sealed partial class PlayViewModel : ObservableObject, IDisposable, IAsyncDisposable
 {
     public const string TargetLanguage = "ar";
 
@@ -27,6 +28,11 @@ public sealed partial class PlayViewModel : ObservableObject, IDisposable
     private readonly ThemeService _themeService;
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
+    private Task _preparationTask = Task.CompletedTask;
+    private Task _playTask = Task.CompletedTask;
+    private Task _captureStopped = Task.CompletedTask;
+    private Task _shutdownTask = Task.CompletedTask;
 
     private CaptureRegion _selectedRegion = CaptureRegion.Empty;
     private string _sourceLanguage = "en";
@@ -53,6 +59,7 @@ public sealed partial class PlayViewModel : ObservableObject, IDisposable
     private bool _disposed;
     private string _selectedNavPage = "play";
     private CancellationTokenSource? _playCts;
+    private CancellationToken _activePlayToken;
     private string _testInputText = string.Empty;
     private string _testTranslatedText = string.Empty;
     private string _testStatusMessage = "Type or paste English text, then press Test to check translation quality.";
@@ -669,10 +676,12 @@ public sealed partial class PlayViewModel : ObservableObject, IDisposable
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        await _databaseMigrator.InitializeAsync(cancellationToken);
+        await Task.Run(() => _databaseMigrator.InitializeAsync(cancellationToken), cancellationToken);
+        if (_disposed) return;
         await RefreshProfilesAsync(cancellationToken);
 
         var settings = await _appSettingsService.LoadAsync(cancellationToken);
+        if (_disposed) return;
         _themeService.ApplyTheme(string.IsNullOrWhiteSpace(settings.Theme) ? "Dark" : settings.Theme);
         _sourceLanguage = string.IsNullOrWhiteSpace(settings.SourceLanguage) ? "en" : settings.SourceLanguage;
         _overlayPlacement = OverlaySettings.NormalizePlacement(settings.OverlayPlacement);
@@ -860,7 +869,9 @@ public sealed partial class PlayViewModel : ObservableObject, IDisposable
         var selectedId = SelectedProfile?.Id;
         var selectedName = SelectedProfile?.Name ?? ProfileName;
         Profiles.Clear();
-        foreach (var profile in await _profileRepository.GetAllAsync(cancellationToken))
+        var profiles = await Task.Run(() => _profileRepository.GetAllAsync(cancellationToken), cancellationToken);
+        if (_disposed) return;
+        foreach (var profile in profiles)
         {
             profile.IsActive = selectedId is > 0
                 ? profile.Id == selectedId
@@ -1043,12 +1054,34 @@ public sealed partial class PlayViewModel : ObservableObject, IDisposable
         StopPlay();
         _pipeline.ResultAvailable -= OnPipelineResultAvailable;
         ResourceCleanup.Dispose(_pipeline, "pipeline-dispose");
-        ResourceCleanup.Dispose(_pipeline.Diagnostics, "diagnostics-dispose");
-        ResourceCleanup.Dispose(_playCts, "play-token-dispose");
-        _playCts = null;
-        ResourceCleanup.Dispose(_offlineProvider, "offline-dispose");
         ResourceCleanup.Dispose(_overlayService, "overlay-dispose");
-        ResourceCleanup.Dispose(_runLock, "play-lock-dispose");
-        _lifetime.Dispose();
+        _shutdownTask = DisposeWorkersAsync();
+    }
+
+    private async Task DisposeWorkersAsync()
+    {
+        try
+        {
+            await Task.WhenAll(_captureStopped, _pipeline.Completion).ConfigureAwait(false);
+        }
+        catch (Exception ex) { AppLog.Write("play-shutdown", ex); }
+        finally
+        {
+            // Native inference can finish after cancellation. Waiting for its
+            // provider lock must never block WPF's dispatcher during shutdown.
+            await Task.Run(() =>
+            {
+                ResourceCleanup.Dispose(_offlineProvider, "offline-dispose");
+                ResourceCleanup.Dispose(_pipeline.Diagnostics, "diagnostics-dispose");
+                ResourceCleanup.Dispose(_runLock, "play-lock-dispose");
+                _lifetime.Dispose();
+            }).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        await _shutdownTask.ConfigureAwait(false);
     }
 }

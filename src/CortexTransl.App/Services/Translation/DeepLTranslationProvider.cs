@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CortexTransl.App.Utils;
 
 namespace CortexTransl.App.Services.Translation;
 
@@ -26,7 +27,7 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
     }
 
-    public string Id => "deepl-ar-story-v3";
+    public string Id => "deepl-ar-story-v4";
 
     public bool SupportsContextualLongText => true;
 
@@ -38,11 +39,13 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
         var apiKey = _settings.DeepLApiKey.Trim();
         if (apiKey.Length == 0) throw new TranslationProviderException("Paste a DeepL API key before translating.", "DeepL missing API key");
         var protectedText = ProtectedStoryText.Create(text, sourceLanguage, targetLanguage, context);
-        var result = await TranslateBatchAsync([protectedText?.Xml ?? text], sourceLanguage, targetLanguage, apiKey,
+        var result = await TranslateBatchAsync([protectedText?.Text ?? text], sourceLanguage, targetLanguage, apiKey,
             TranslationContentKind.GameDialogue, cancellationToken, context, protectedText is not null);
         if (result.Length != 1 || string.IsNullOrWhiteSpace(result[0]))
             throw new TranslationProviderException("DeepL returned an incomplete translation.", "DeepL invalid response");
-        return protectedText?.ReadTranslation(result[0]) ?? result[0];
+        return protectedText is null
+            ? ArabicTranslationCleaner.Clean(result[0], targetLanguage)
+            : protectedText.ReadTranslation(ArabicTranslationCleaner.Clean(result[0], targetLanguage));
     }
 
     public async Task<string> TranslateAsync(
@@ -118,7 +121,7 @@ public sealed class DeepLTranslationProvider : ITranslationProvider
 
             for (var batchIndex = 0; batchIndex < batchIndexes.Length; batchIndex++)
             {
-                results[batchIndexes[batchIndex]] = translatedBatch[batchIndex];
+                results[batchIndexes[batchIndex]] = ArabicTranslationCleaner.Clean(translatedBatch[batchIndex], targetLanguage);
             }
         }
 

@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Markup;
 
 namespace CortexTransl.App.Views;
 
@@ -68,6 +69,7 @@ public partial class OverlayWindow : Window
             return;
         }
 
+        TranslationText.FlowDirection = FlowDirection.RightToLeft;
         var trimmed = text.Trim();
         if (_lastText == trimmed)
         {
@@ -124,6 +126,7 @@ public partial class OverlayWindow : Window
                     TextWrapping = TextWrapping.Wrap,
                     TextAlignment = TextAlignment.Center,
                     FlowDirection = FlowDirection.RightToLeft,
+                    Language = XmlLanguage.GetLanguage("ar"),
                     VerticalAlignment = VerticalAlignment.Center
                 }
             };
@@ -295,7 +298,7 @@ public partial class OverlayWindow : Window
             var formatted = new FormattedText(
                 text,
                 CultureInfo.GetCultureInfo("ar"),
-                FlowDirection.RightToLeft,
+                TranslationText.FlowDirection,
                 typeface,
                 fontSize,
                 _textBrush,

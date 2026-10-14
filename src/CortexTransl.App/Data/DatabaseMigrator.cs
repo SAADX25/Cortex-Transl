@@ -28,9 +28,18 @@ public sealed class DatabaseMigrator
                 CreatedUtc TEXT NOT NULL,
                 LastUsedUtc TEXT NOT NULL,
                 HitCount INTEGER NOT NULL DEFAULT 0,
+                CacheVersion INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(SourceTextHash, SourceLanguage, TargetLanguage, Provider)
             );
             """, cancellationToken);
+
+        await EnsureColumnAsync(connection, "TranslationCache", "CacheVersion", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await using (var purge = connection.CreateCommand())
+        {
+            purge.CommandText = "DELETE FROM TranslationCache WHERE CacheVersion < $version;";
+            purge.Parameters.AddWithValue("$version", TranslationCacheVersion.Current);
+            await purge.ExecuteNonQueryAsync(cancellationToken);
+        }
 
         await ExecuteAsync(connection, """
             CREATE TABLE IF NOT EXISTS GameProfiles (

@@ -32,7 +32,8 @@ internal static class SubtitleVisualSignature
                     var light = (p[2] * 77 + p[1] * 150 + p[0] * 29) >> 8;
                     // White/light caption strokes remain stable while mid-tone
                     // animated backgrounds vary. Dark captions also contribute.
-                    var bucket = light >= 210 ? 2UL : light <= 35 ? 1UL : 0UL;
+                    var yellow = p[2] >= 180 && p[1] >= 160 && p[0] < Math.Min(p[2], p[1]) * 3 / 4;
+                    var bucket = light >= 210 || yellow ? 2UL : light <= 35 ? 1UL : 0UL;
                     if (bucket == 2) lights++; else if (bucket == 1) darks++;
                     word |= bucket << ((x & 31) * 2);
                     if ((x & 31) == 31) { hash = (hash ^ word) * 1099511628211UL; word = 0; }

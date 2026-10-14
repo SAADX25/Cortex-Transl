@@ -1,5 +1,6 @@
 using CortexTransl.App.Models;
 using CortexTransl.App.Services.Capture;
+using CortexTransl.App.Services.Translation;
 using CortexTransl.App.Utils;
 using Xunit;
 
@@ -8,17 +9,58 @@ namespace CortexTransl.Tests;
 public sealed class DialogueTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PartialHelloFramesRequireTheFinalSentenceToSettle(bool fast)
+    {
+        var clock = new ManualClock();
+        var tracker = new DialogueTracker(clock) { Settings = new() { FastSubtitles = fast } };
+        foreach (var frame in new[] { "Hel", "Hello ", "Hello world!" })
+        {
+            Assert.False(tracker.Observe(frame).Ready);
+            clock.Advance(60);
+        }
+        Assert.False(tracker.Observe("Hello world!").Ready);
+        clock.Advance(250);
+        var final = tracker.Observe("Hello world!");
+        Assert.True(final.Ready);
+        Assert.Equal("Hello world!", final.Text);
+    }
+
+    [Theory]
+    [InlineData("[[ z x q 0 q x z ]]، مرحباً ] ] Z X Q 1 Q X Z [ [ !")]
+    [InlineData("\u202E]]ZXQ0QXZ[[، مرحباً [[ZXQ١QXZ]] !")]
+    public void ArabicNamesAndVariablesSurviveSpacedOrMirroredPlaceholders(string output)
+    {
+        var context = new StoryTranslationContext { SpeakerNames = new Dictionary<string, string> { ["Alice"] = "أليس" } };
+        var protectedText = ProtectedStoryText.Create("Alice, greet {player_name}!", "en", "ar", context, useXml: false)!;
+        var restored = ArabicTranslationCleaner.Clean(protectedText.ReadTranslation(output), "ar");
+        Assert.Equal("أليس، مرحباً {player_name}!", restored);
+        Assert.DoesNotContain("ZXQ", restored, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("\u202Eقالت Alice !", "قالت Alice!")]
+    [InlineData("هل تسمعني Bob ?", "هل تسمعني Bob?")]
+    [InlineData("انتظر Alice . . .", "انتظر Alice...")]
+    public void BidiCleanupPreservesMixedWordsAndTerminalPunctuation(string source, string expected)
+        => Assert.Equal(expected, ArabicTranslationCleaner.Clean(source, "ar"));
+
+    [Theory]
     [InlineData("Run!")]
     [InlineData("No!")]
     [InlineData("Help!")]
-    public void ShortDialogueAfterLongDialogueIsImmediatelyEligible(string shortLine)
+    public void ShortDialogueAfterLongDialogueRequiresIndependentConfirmation(string shortLine)
     {
         const string longLine = "We must make our way through the forest before the enemy reaches us.";
         Assert.False(DialogueTextAssembler.LooksLikeOcrGlitch(longLine, shortLine));
-        var tracker = new DialogueTracker(new ManualClock());
+        var clock = new ManualClock();
+        var tracker = new DialogueTracker(clock);
         var before = tracker.Observe(longLine);
         var after = tracker.Observe(shortLine);
-        Assert.True(after.Ready);
+        Assert.False(after.Ready);
+        clock.Advance(100);
+        Assert.True(tracker.Observe(shortLine).Ready);
         Assert.True(after.Changed);
         Assert.True(after.Sequence > before.Sequence);
     }
@@ -44,7 +86,7 @@ public sealed class DialogueTests
         clock.Advance(300);
         Assert.True(tracker.Observe("We have to leave").Ready);
         Assert.False(tracker.Observe("We have to leave!").Ready);
-        clock.Advance(100);
+        clock.Advance(250);
         Assert.True(tracker.Observe("We have to leave!").Ready);
     }
 
@@ -60,6 +102,8 @@ public sealed class DialogueTests
         var gone = tracker.Observe("");
         Assert.True(gone.Clear);
         Assert.True(gone.Sequence > line.Sequence);
+        Assert.False(tracker.Observe("Help!").Ready);
+        clock.Advance(100);
         Assert.True(tracker.Observe("Help!").Ready);
     }
 
@@ -74,6 +118,8 @@ public sealed class DialogueTests
         Assert.False(tracker.Observe("No!").Changed);
         clock.Advance(1600);
         Assert.True(tracker.Observe("", ocrFailed: true).Clear);
+        Assert.False(tracker.Observe("Run!").Ready);
+        clock.Advance(100);
         Assert.True(tracker.Observe("Run!").Ready);
     }
 

@@ -12,6 +12,9 @@ using Windows.Graphics;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX;
 using Windows.Graphics.DirectX.Direct3D11;
+using Windows.Foundation.Metadata;
+using Windows.Security.Authorization.AppCapabilityAccess;
+using WinRT;
 using MapFlags = Vortice.Direct3D11.MapFlags;
 
 namespace CortexTransl.App.Services.Capture;
@@ -37,6 +40,8 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
     private Rectangle? _cachedLocation;
     private volatile Exception? _captureError;
     private volatile bool _disposed;
+    private readonly CancellationTokenSource _borderRequestCancellation = new();
+    private Task _borderRequestTask = Task.CompletedTask;
     public long ReadbackCount { get; private set; }
     public long ReadbackBytes { get; private set; }
     public long StagingAllocations { get; private set; }
@@ -79,7 +84,7 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
             context = createdDevice.ImmediateContext;
             if (device is null || context is null)
             {
-                return null;
+                throw new InvalidOperationException("The graphics capture device was not initialized.");
             }
 
             using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
@@ -99,8 +104,7 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
                 item.Size);
             session = framePool.CreateCaptureSession(item);
             session.IsCursorCaptureEnabled = false;
-            // Keep Windows' capture indicator. Border removal requires explicit
-            // consent and a package capability this unpackaged app does not have.
+            var borderlessSupported = ConfigureBorderlessCapture(session);
             capturer = new WindowsGraphicsWindowCapturer(
                 window,
                 device,
@@ -110,6 +114,8 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
                 framePool,
                 session, diagnostics);
             session.StartCapture();
+            if (borderlessSupported)
+                capturer._borderRequestTask = Task.Run(() => capturer.RequestBorderlessCaptureAsync(capturer._borderRequestCancellation.Token));
             return capturer;
         }
         catch (Exception ex)
@@ -127,6 +133,45 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
             ResourceCleanup.Dispose(device, "capture-device-dispose");
             return null;
         }
+    }
+
+    private static bool ConfigureBorderlessCapture(GraphicsCaptureSession session)
+    {
+        if (!ApiInformation.IsPropertyPresent("Windows.Graphics.Capture.GraphicsCaptureSession", "IsBorderRequired"))
+            return false;
+
+        try
+        {
+            session.IsBorderRequired = false;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Borderless capture is optional; an unsupported API or denied
+            // capability must not disable the translation capture session.
+            AppLog.Write("capture-border", ex);
+            return false;
+        }
+    }
+
+    private async Task RequestBorderlessCaptureAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Consent is optional and must never delay capture or OCR. Reapply
+            // the property after permission arrives; Windows enforces denial.
+            var access = await GraphicsCaptureAccess.RequestAccessAsync(GraphicsCaptureAccessKind.Borderless)
+                .AsTask(cancellationToken).ConfigureAwait(false);
+            lock (_gate)
+            {
+                if (_disposed || cancellationToken.IsCancellationRequested) return;
+                _session.IsBorderRequired = false;
+            }
+            if (access != AppCapabilityAccessStatus.Allowed)
+                AppLog.Write("capture-border", $"Windows retained the capture border: {access}.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception ex) { if (!_disposed) AppLog.Write("capture-border", ex); }
     }
 
     public Bitmap? CaptureRegion(CaptureRegion region, CaptureRegion windowBounds, TimeSpan wait)
@@ -162,16 +207,20 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
                 result = CopyRegion(frame, crop.Value);
             }
         }
-        lock (_gate)
+        try
         {
-            if (!_disposed && size.Width > 0 && size.Height > 0 && (size.Width != _frameSize.Width || size.Height != _frameSize.Height))
+            lock (_gate)
             {
-                Interlocked.Exchange(ref _latestFrame, null)?.Dispose();
-                _framePool.Recreate(_winRtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, size);
-                _frameSize = size;
+                if (!_disposed && size.Width > 0 && size.Height > 0 && (size.Width != _frameSize.Width || size.Height != _frameSize.Height))
+                {
+                    Interlocked.Exchange(ref _latestFrame, null)?.Dispose();
+                    _framePool.Recreate(_winRtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, size);
+                    _frameSize = size;
+                }
             }
+            return result;
         }
-        return result;
+        catch { result?.Dispose(); throw; }
     }
 
     private Direct3D11CaptureFrame? AcquireFrame(TimeSpan wait, CaptureRegion region, CaptureRegion bounds)
@@ -266,7 +315,9 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
-            _framePool.FrameArrived -= OnFrameArrived;
+            _borderRequestCancellation.Cancel();
+            try { _framePool.FrameArrived -= OnFrameArrived; }
+            catch (Exception ex) { AppLog.Write("capture-event-unsubscribe", ex); }
             ResourceCleanup.Dispose(_session, "capture-session-dispose");
             ResourceCleanup.Dispose(_framePool, "capture-pool-dispose");
             ResourceCleanup.Dispose(Interlocked.Exchange(ref _latestFrame, null), "capture-frame-dispose");
@@ -278,5 +329,7 @@ internal sealed class WindowsGraphicsWindowCapturer : IDisposable
         }
         try { _frameReady.Set(); } catch (ObjectDisposedException) { }
         ResourceCleanup.Dispose(_frameReady, "capture-event-dispose");
+        _ = _borderRequestTask.ContinueWith(_ => _borderRequestCancellation.Dispose(), CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 }

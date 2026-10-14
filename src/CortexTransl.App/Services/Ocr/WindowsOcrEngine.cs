@@ -58,6 +58,7 @@ public sealed class WindowsOcrEngine : IOcrEngine
 
             if (_engineLanguage != sourceLanguage || _engine is null)
             {
+                _emptyReadings = 0; _failedSignature = null; _lastRecoveryAt = 0;
                 if (!_engines.TryGetValue(sourceLanguage, out _engine))
                 {
                     _engine = CreateEngine(sourceLanguage);
@@ -97,16 +98,14 @@ public sealed class WindowsOcrEngine : IOcrEngine
                     _lastRecoveryAt = now; _failedSignature = signature;
                     using var recoveryTiming = _diagnostics.Measure(LatencyStage.OcrRecovery);
                     recognized = await RecognizeRecoveryAsync(engine, bitmap, "reduced-text", sourceLanguage, captureKind, cancellationToken);
-                    if (string.IsNullOrWhiteSpace(recognized.Text))
-                    {
-                        recognized = await RecognizeRecoveryAsync(engine, bitmap, "auto-recovery", sourceLanguage, captureKind, cancellationToken);
-                    }
                     if (string.IsNullOrWhiteSpace(recognized.Text) && signature.LightPixels >= 16)
                     {
                         // Outline/glow can confuse native segmentation even when
                         // resized. Isolate bright strokes without changing words.
                         recognized = await RecognizeRecoveryAsync(engine, bitmap, "caption-strokes", sourceLanguage, captureKind, cancellationToken);
                     }
+                    if (string.IsNullOrWhiteSpace(recognized.Text))
+                        recognized = await RecognizeRecoveryAsync(engine, bitmap, "auto-recovery", sourceLanguage, captureKind, cancellationToken);
                 }
             }
             if (!string.IsNullOrWhiteSpace(recognized.Text)) { _emptyReadings = 0; _failedSignature = null; }
@@ -211,10 +210,14 @@ public sealed class WindowsOcrEngine : IOcrEngine
         int offsetX,
         int offsetY)
     {
-        var left = words.Min(word => word.BoundingRect.X);
-        var top = words.Min(word => word.BoundingRect.Y);
-        var right = words.Max(word => word.BoundingRect.X + word.BoundingRect.Width);
-        var bottom = words.Max(word => word.BoundingRect.Y + word.BoundingRect.Height);
+        var left = double.MaxValue; var top = double.MaxValue;
+        var right = double.MinValue; var bottom = double.MinValue;
+        foreach (var word in words)
+        {
+            var bounds = word.BoundingRect;
+            left = Math.Min(left, bounds.X); top = Math.Min(top, bounds.Y);
+            right = Math.Max(right, bounds.X + bounds.Width); bottom = Math.Max(bottom, bounds.Y + bounds.Height);
+        }
 
         var x = Clamp((int)Math.Floor(left / scale) + offsetX - 2, 0, Math.Max(0, width - 1));
         var y = Clamp((int)Math.Floor(top / scale) + offsetY - 2, 0, Math.Max(0, height - 1));
@@ -235,6 +238,7 @@ public sealed class WindowsOcrEngine : IOcrEngine
 
     private static async Task<SoftwareBitmap> ToSoftwareBitmapAsync(Bitmap bitmap, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
             return CopyPixelsDirect(bitmap);
@@ -247,33 +251,39 @@ public sealed class WindowsOcrEngine : IOcrEngine
 
     private static unsafe SoftwareBitmap CopyPixelsDirect(Bitmap bitmap)
     {
+        var width = bitmap.Width; var height = bitmap.Height;
         var softwareBitmap = new SoftwareBitmap(
             BitmapPixelFormat.Bgra8,
-            bitmap.Width,
-            bitmap.Height,
+            width,
+            height,
             BitmapAlphaMode.Premultiplied);
 
-        var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
-        var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        BitmapData? data = null;
         try
         {
+            data = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
             using var buffer = softwareBitmap.LockBuffer(BitmapBufferAccessMode.Write);
             using var reference = buffer.CreateReference();
             var access = reference.As<IMemoryBufferByteAccess>();
             access.GetBuffer(out var destination, out var capacity);
 
             var sourceStride = data.Stride;
-            var destinationStride = buffer.GetPlaneDescription(0).Stride;
-            var rowBytes = bitmap.Width * 4;
+            var plane = buffer.GetPlaneDescription(0);
+            var destinationStride = plane.Stride;
+            var rowBytes = checked(width * 4);
+            var requiredBytes = (long)plane.StartIndex + (long)(height - 1) * destinationStride + rowBytes;
+            if (plane.StartIndex < 0 || destinationStride < rowBytes || requiredBytes > capacity)
+                throw new COMException("OCR bitmap buffer has an unsupported layout.");
+            destination += plane.StartIndex;
             var source = (byte*)data.Scan0;
 
-            if (sourceStride == destinationStride && sourceStride > 0)
+            if (sourceStride == destinationStride && sourceStride == rowBytes)
             {
-                System.Buffer.MemoryCopy(source, destination, capacity, (long)sourceStride * bitmap.Height);
+                System.Buffer.MemoryCopy(source, destination, capacity - plane.StartIndex, (long)rowBytes * height);
             }
             else
             {
-                for (var y = 0; y < bitmap.Height; y++)
+                for (var y = 0; y < height; y++)
                 {
                     System.Buffer.MemoryCopy(
                         source + (y * sourceStride),
@@ -290,7 +300,7 @@ public sealed class WindowsOcrEngine : IOcrEngine
         }
         finally
         {
-            bitmap.UnlockBits(data);
+            if (data is not null) bitmap.UnlockBits(data);
         }
 
         return softwareBitmap;
@@ -303,7 +313,8 @@ public sealed class WindowsOcrEngine : IOcrEngine
         var bytes = memoryStream.ToArray();
 
         using var randomAccessStream = new InMemoryRandomAccessStream();
-        using (var writer = new DataWriter(randomAccessStream.GetOutputStreamAt(0)))
+        using var output = randomAccessStream.GetOutputStreamAt(0);
+        using (var writer = new DataWriter(output))
         {
             writer.WriteBytes(bytes);
             await writer.StoreAsync().AsTask(cancellationToken);

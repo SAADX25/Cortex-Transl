@@ -14,6 +14,8 @@
         UseLayoutRounding="True">
     <Grid>
         <Border x:Name="OverlayChrome"
+                FlowDirection="RightToLeft"
+                Language="ar"
                 Background="#E0020617"
                 BorderBrush="#88FFFFFF"
                 BorderThickness="1"
@@ -26,6 +28,7 @@
                        VerticalAlignment="Center"
                        HorizontalAlignment="Stretch"
                        FlowDirection="RightToLeft"
+                       Language="ar"
                        Foreground="White"
                        FontFamily="Segoe UI, Tahoma, Arial"
                        FontWeight="SemiBold" />

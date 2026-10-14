@@ -64,7 +64,7 @@ public static partial class DialogueTextAssembler
             return false;
         }
 
-        if (text.Length == 1 && cjk == 0)
+        if (text.Length == 1 && cjk == 0 && text is not ("I" or "a" or "A" or "O"))
         {
             return false;
         }
@@ -99,20 +99,20 @@ public static partial class DialogueTextAssembler
             }
 
             var last = previous;
-            var gap = block.Bounds.Y - (last.Y + last.Height);
             var lineHeight = Math.Max(12, Math.Max(last.Height, block.Bounds.Height));
             var sameRow = Math.Abs(block.Bounds.Y - last.Y) <= lineHeight * 0.45;
 
-            if (builder[^1] is '-' or '—' or 'ー')
+            if (builder.Length > 1 && builder[^1] == '-' && char.IsLetter(builder[^2])
+                && char.IsLower(block.Text[0]))
             {
                 builder.Length--;
                 builder.Append(block.Text);
             }
             else if (sameRow)
             {
-                builder.Append(" · ").Append(block.Text);
+                builder.Append(' ').Append(block.Text);
             }
-            else if (gap > lineHeight * 0.55)
+            else if (TextSimilarity.LooksComplete(builder.ToString()))
             {
                 builder.Append('\n').Append(block.Text);
             }
@@ -129,9 +129,16 @@ public static partial class DialogueTextAssembler
 
     private static string CleanLine(string text, string sourceLanguage)
     {
-        var cleaned = TextNormalizer.Normalize(text)
-            .Replace('\u00A0', ' ')
-            .Replace('\u3000', ' ');
+        var lines = text.Replace("\r\n", "\n").Split('\n')
+            .Select(line => OcrTextCanonicalizer.Normalize(line)).Where(line => line.Length > 0);
+        var paragraph = new StringBuilder();
+        foreach (var line in lines)
+        {
+            if (paragraph.Length > 0)
+                paragraph.Append(TextSimilarity.LooksComplete(paragraph.ToString()) ? '\n' : ' ');
+            paragraph.Append(line);
+        }
+        var cleaned = paragraph.ToString();
         return IsCjkLanguage(sourceLanguage) ? CompactCjk(cleaned) : cleaned;
     }
 

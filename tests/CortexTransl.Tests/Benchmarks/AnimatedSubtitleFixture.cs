@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Windows.Controls;
 
 namespace CortexTransl.Tests.Benchmarks;
 
@@ -77,6 +78,20 @@ internal sealed class AnimatedSubtitleFixture : IAsyncDisposable
             _overlay.UpdateLayout();
         }, DispatcherPriority.Render);
         return await NextRenderAsync();
+    }
+
+    public async Task<int> PublishMenuAsync(IReadOnlyList<TranslatedBlock> blocks)
+    {
+        var count = await _dispatcher.InvokeAsync(() =>
+        {
+            _overlay.Pin(Region, new("cover", .88, "list"));
+            if (!_overlay.IsVisible) _overlay.Show();
+            _overlay.SetBlocks(blocks);
+            _overlay.UpdateLayout();
+            return ((Canvas)_overlay.FindName("LabelCanvas")).Children.Count;
+        });
+        await NextRenderAsync();
+        return count;
     }
     private async Task<long> NextRenderAsync()
     {

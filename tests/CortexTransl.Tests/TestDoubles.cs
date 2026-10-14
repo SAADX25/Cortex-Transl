@@ -18,6 +18,18 @@ internal sealed class ManualClock : TimeProvider
     public void Advance(int milliseconds) => Interlocked.Add(ref _milliseconds, milliseconds);
 }
 
+internal static class PipelineTestDriver
+{
+    public static async Task ConfirmAsync(TranslationPipeline pipeline, ManualClock? clock = null,
+        CancellationToken cancellationToken = default)
+    {
+        await pipeline.RunAsync(new(0, 0, 64, 32), "en", "ar", false, cancellationToken);
+        if (clock is null) await Task.Delay(100);
+        else clock.Advance(100);
+        await pipeline.RunAsync(new(0, 0, 64, 32), "en", "ar", false, cancellationToken);
+    }
+}
+
 internal sealed class FakeCapture : IScreenCaptureService
 {
     private int _frame;
@@ -34,8 +46,8 @@ internal sealed class FakeCapture : IScreenCaptureService
         var bitmap = new Bitmap(64, 32, PixelFormat.Format32bppArgb);
         if (!SameFrame) _frame++;
         bitmap.SetPixel(3, 4, Color.FromArgb(_frame & 255, (_frame >> 8) & 255, 100));
-        for (var bit = 0; bit < 16; bit++)
-            if ((_frame & (1 << bit)) != 0) bitmap.SetPixel(8 + bit, 8, Color.White);
+        // Background changes must not masquerade as changing subtitle glyphs.
+        bitmap.SetPixel(8, 8, Color.White);
         return Task.FromResult(bitmap);
     }
     public void Dispose() { }

@@ -11,7 +11,6 @@ using System.Drawing;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
-using Baseline = CortexTransl.Tests.Benchmarks.Update17;
 
 namespace CortexTransl.Tests.Benchmarks;
 
@@ -31,6 +30,33 @@ public sealed class WindowsBenchmarkCollection;
 [Collection("Windows latency benchmark")]
 public sealed class ControlledWindowsBenchmark(ITestOutputHelper output)
 {
+    [ControlledWindowFact]
+    public async Task RealBorderlessCaptureReadsMenuAndRendersArabicLabels()
+    {
+        await using var fixture = new AnimatedSubtitleFixture();
+        await fixture.ReadyAsync();
+        await fixture.PresentAsync("New Game\nSettings");
+        using var diagnostics = new PerformanceDiagnostics();
+        using var capture = new FixtureCapture(fixture, diagnostics);
+        using var client = new HttpClient(new DelegateHttpHandler((_, _) => throw new InvalidOperationException("No network")));
+        var folder = Path.Combine(Path.GetTempPath(), "CortexTransl-menu-" + Guid.NewGuid().ToString("N"));
+        using var provider = new OfflineBergamotTranslationProvider(new OfflineModelInstaller(folder, BergamotFactAttribute.FindModels(), client));
+        using var pipeline = new TranslationPipeline(capture, new WindowsOcrEngine(), provider, new FakeCache());
+        pipeline.Configure("menu-fixture", new() { FastSubtitles = true });
+        var timer = Stopwatch.StartNew();
+        PipelineResult result = pipeline.LatestResult;
+        while (timer.Elapsed < TimeSpan.FromSeconds(8))
+        {
+            result = await pipeline.RunAsync(fixture.Region, "en", "ar", true);
+            if (result.Blocks.Count >= 2) break;
+            await Task.Delay(80);
+        }
+        Assert.Contains(result.Blocks, block => block.TranslatedText == "لعبة جديدة");
+        Assert.Contains(result.Blocks, block => block.TranslatedText == "الإعدادات");
+        Assert.Equal(result.Blocks.Count, await fixture.PublishMenuAsync(result.Blocks));
+        output.WriteLine($"Real WGC + Windows OCR + offline menu terminology + WPF Arabic labels: {result.Blocks.Count} labels, {timer.ElapsedMilliseconds} ms.");
+    }
+
     [ControlledWindowFact]
     public async Task CaptureStopRestartAndWindowLossKeepSelectedTargetAndReleaseSessions()
     {
@@ -116,35 +142,35 @@ public sealed class ControlledWindowsBenchmark(ITestOutputHelper output)
      "We must reach the bridge before the enemy catches us!", "I will never leave you", "He is alive."];
 
     [ControlledWindowFact]
-    public async Task MeasureUpdate17AndFastSubtitlesWithRealWindowCaptureOcrBergamotAndOverlay()
+    public async Task MeasureStandardAndFastSubtitlesWithProductionCaptureOcrBergamotAndOverlay()
     {
         await using var fixture = new AnimatedSubtitleFixture();
         await fixture.ReadyAsync();
         var directory = Environment.GetEnvironmentVariable("CORTEX_TRANSL_BENCHMARK_OUTPUT")
             ?? Path.Combine(Path.GetTempPath(), "CortexTransl-latency-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var baseline = await MeasureAsync(fixture, directory, legacy: true);
+        var baseline = await MeasureAsync(fixture, directory, fastSubtitles: false);
         GC.Collect(); GC.WaitForPendingFinalizers();
-        var upgraded = await MeasureAsync(fixture, directory, legacy: false);
-        var comparison = new { BaselineCommit = "e99fd23 (Update-17)", Scope = "controlled WPF animated source, real WGC/OCR/Bergamot/OverlayWindow; not a browser/game or physical display scanout measurement",
+        var upgraded = await MeasureAsync(fixture, directory, fastSubtitles: true);
+        var comparison = new { Profiles = "production standard / fast subtitles", Scope = "controlled WPF animated source, real WGC/OCR/Bergamot/OverlayWindow; not a browser/game or physical display scanout measurement",
             baseline, upgraded };
         File.WriteAllText(Path.Combine(directory, "comparison.json"), JsonSerializer.Serialize(comparison, new JsonSerializerOptions { WriteIndented = true }));
         output.WriteLine(JsonSerializer.Serialize(comparison));
-        Assert.All(baseline.Readings, x => Assert.True(x.CorrectOcr, $"Update-17 fixture {x.Index} was not correctly recognized."));
-        Assert.All(upgraded.Readings, x => Assert.True(x.CorrectOcr, $"Upgraded fixture {x.Index} was not correctly recognized."));
+        Assert.All(baseline.Readings, x => Assert.True(x.CorrectOcr, $"Standard fixture {x.Index} was not correctly recognized."));
+        Assert.All(upgraded.Readings, x => Assert.True(x.CorrectOcr, $"Fast fixture {x.Index} was not correctly recognized."));
         Assert.Equal(baseline.Readings.Select(x => x.Arabic), upgraded.Readings.Select(x => x.Arabic));
-        Assert.True(upgraded.ReadbackBytes < baseline.ReadbackBytes);
-        Assert.True(upgraded.StagingAllocations < baseline.StagingAllocations);
+        Assert.True(upgraded.Readbacks > 0);
+        Assert.Equal(1, upgraded.StagingAllocations);
     }
 
     private sealed record Reading(int Index, double Milliseconds, bool CorrectOcr, string Arabic);
     private sealed record Measurements(IReadOnlyDictionary<string, StageStatistics> Stages, List<Reading> Readings,
         long Readbacks, long ReadbackBytes, long StagingAllocations, double WallSeconds, double CpuSeconds);
 
-    private async Task<Measurements> MeasureAsync(AnimatedSubtitleFixture fixture, string directory, bool legacy)
+    private async Task<Measurements> MeasureAsync(AnimatedSubtitleFixture fixture, string directory, bool fastSubtitles)
     {
         using var diagnostics = new PerformanceDiagnostics { Enabled = true };
-        var label = legacy ? "update17" : "fast-subtitles";
+        var label = fastSubtitles ? "fast-subtitles" : "standard";
         // A fresh fixture DB on every run keeps cold-cache / repeated-line
         // samples reproducible without touching any real user cache.
         var factory = new SqliteConnectionFactory(Path.Combine(directory, label + "-" + Guid.NewGuid().ToString("N") + ".db"));
@@ -152,7 +178,7 @@ public sealed class ControlledWindowsBenchmark(ITestOutputHelper output)
         var cache = new SqliteTranslationCacheRepository(factory);
         using var networkForbidden = new HttpClient(new DelegateHttpHandler((_, _) => throw new InvalidOperationException("Benchmark must stay offline")));
         var installer = new OfflineModelInstaller(Path.Combine(directory, label + "-models"), BergamotFactAttribute.FindModels(), networkForbidden);
-        using var capture = new FixtureCapture(fixture, diagnostics, legacy);
+        using var capture = new FixtureCapture(fixture, diagnostics);
         var readings = new List<Reading>();
         using var process = Process.GetCurrentProcess();
         var cpuStart = process.TotalProcessorTime; var wall = Stopwatch.StartNew();
@@ -162,34 +188,19 @@ public sealed class ControlledWindowsBenchmark(ITestOutputHelper output)
         TaskCompletionSource<PipelineResult>? pending = null;
         string expectedLine = string.Empty;
         IDisposable provider;
-        if (legacy)
+        var offline = new OfflineBergamotTranslationProvider(installer, diagnostics);
+        provider = offline;
+        await offline.WarmAsync("en");
+        var current = new TranslationPipeline(capture, new WindowsOcrEngine(diagnostics), offline, cache, diagnostics: diagnostics);
+        current.Configure("controlled", new StorySettings { FastSubtitles = fastSubtitles, PerformanceDiagnostics = true });
+        available = result =>
         {
-            var offline = new Baseline.OfflineBergamotTranslationProvider(installer) { Diagnostics = diagnostics };
-            provider = offline;
-            offline.BenchmarkWarmup = true;
-            await offline.TranslateAsync("Hello.", "en", "ar");
-            offline.BenchmarkWarmup = false;
-            var original = new Baseline.TranslationPipeline(capture, new Baseline.WindowsOcrEngine { Diagnostics = diagnostics }, offline, cache) { Diagnostics = diagnostics };
-            original.Configure("controlled", new StorySettings());
-            pipeline = original;
-            tick = () => original.RunAsync(fixture.Region, "en", "ar", false);
-        }
-        else
-        {
-            var offline = new OfflineBergamotTranslationProvider(installer, diagnostics);
-            provider = offline;
-            await offline.WarmAsync("en");
-            var current = new TranslationPipeline(capture, new WindowsOcrEngine(diagnostics), offline, cache, diagnostics: diagnostics);
-            current.Configure("controlled", new StorySettings { FastSubtitles = true, PerformanceDiagnostics = true });
-            available = result =>
-            {
-                if (OcrTextCanonicalizer.Normalize(result.OriginalText).Equals(expectedLine, StringComparison.OrdinalIgnoreCase))
-                    pending?.TrySetResult(result);
-            };
-            current.ResultAvailable += available;
-            pipeline = current;
-            tick = () => current.RunAsync(fixture.Region, "en", "ar", false);
-        }
+            if (OcrTextCanonicalizer.Normalize(result.OriginalText).Equals(expectedLine, StringComparison.OrdinalIgnoreCase))
+                pending?.TrySetResult(result);
+        };
+        current.ResultAvailable += available;
+        pipeline = current;
+        tick = () => current.RunAsync(fixture.Region, "en", "ar", false);
         try
         {
             for (var index = 0; index < 24; index++)
@@ -218,9 +229,9 @@ public sealed class ControlledWindowsBenchmark(ITestOutputHelper output)
                         correct = true; arabic = result.TranslatedText;
                         break;
                     }
-                    var delay = legacy ? 100 : Math.Max(5, 80 - (int)Stopwatch.GetElapsedTime(turn).TotalMilliseconds);
-                    if (!legacy) await Task.WhenAny(pending.Task, Task.Delay(delay));
-                    else await Task.Delay(delay);
+                    var interval = fastSubtitles ? 80 : 100;
+                    var delay = Math.Max(5, interval - (int)Stopwatch.GetElapsedTime(turn).TotalMilliseconds);
+                    await Task.WhenAny(pending.Task, Task.Delay(delay));
                 }
                 if (!correct) duration = timeout.Elapsed.TotalMilliseconds;
                 readings.Add(new(index, duration, correct, arabic));
@@ -244,24 +255,22 @@ public sealed class ControlledWindowsBenchmark(ITestOutputHelper output)
     private sealed class FixtureCapture : IScreenCaptureService
     {
         private readonly AnimatedSubtitleFixture _fixture;
-        private readonly WindowsGraphicsWindowCapturer? _current;
-        private readonly Baseline.WindowsGraphicsWindowCapturer? _baseline;
-        public FixtureCapture(AnimatedSubtitleFixture fixture, PerformanceDiagnostics diagnostics, bool legacy)
+        private readonly WindowsGraphicsWindowCapturer _capture;
+        public FixtureCapture(AnimatedSubtitleFixture fixture, PerformanceDiagnostics diagnostics)
         {
             _fixture = fixture;
-            if (legacy) { _baseline = Baseline.WindowsGraphicsWindowCapturer.TryCreate(fixture.Handle) ?? throw new InvalidOperationException("Update-17 WGC unavailable"); _baseline.Diagnostics = diagnostics; }
-            else _current = WindowsGraphicsWindowCapturer.TryCreate(fixture.Handle, diagnostics) ?? throw new InvalidOperationException("WGC unavailable");
+            _capture = WindowsGraphicsWindowCapturer.TryCreate(fixture.Handle, diagnostics)
+                ?? throw new InvalidOperationException("WGC unavailable");
         }
-        public long Readbacks => _baseline?.ReadbackCount ?? _current!.ReadbackCount;
-        public long ReadbackBytes => _baseline?.ReadbackBytes ?? _current!.ReadbackBytes;
-        public long StagingAllocations => _baseline?.StagingAllocations ?? _current!.StagingAllocations;
+        public long Readbacks => _capture.ReadbackCount;
+        public long ReadbackBytes => _capture.ReadbackBytes;
+        public long StagingAllocations => _capture.StagingAllocations;
         public Task<Bitmap> CaptureAsync(CaptureRegion region, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var bitmap = _baseline is not null ? _baseline.CaptureRegion(region, _fixture.Bounds, TimeSpan.FromMilliseconds(80))
-                : _current!.CaptureRegion(region, _fixture.Bounds, TimeSpan.FromMilliseconds(80));
+            var bitmap = _capture.CaptureRegion(region, _fixture.Bounds, TimeSpan.FromMilliseconds(80));
             return Task.FromResult(bitmap ?? throw new CaptureUnavailableException("Controlled fixture frame unavailable"));
         }
-        public void Dispose() { _baseline?.Dispose(); _current?.Dispose(); }
+        public void Dispose() => _capture.Dispose();
     }
 }

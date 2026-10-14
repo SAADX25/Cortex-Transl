@@ -88,6 +88,7 @@ public sealed partial class PlayViewModel
 
     private async Task TogglePlayAsync()
     {
+        if (_disposed) return;
         if (IsPlaying)
         {
             StopPlay();
@@ -112,35 +113,49 @@ public sealed partial class PlayViewModel
         }
 
         IsPlaying = true;
-        _pipeline.Reset();
-        _pipeline.BindCapture(SelectedRegion, IsListMode, onlyIfUnbound: true);
         _pipeline.Configure(string.IsNullOrWhiteSpace(ProfileName) ? "session" : ProfileName.Trim(), _storySettings);
-        _playCts?.Dispose();
-        _playCts = new CancellationTokenSource();
+        _playCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         var token = _playCts.Token;
-        if (IsOfflineEngine)
+        _activePlayToken = token;
+        var region = SelectedRegion;
+        var listMode = IsListMode;
+        var language = SourceLanguage;
+        var offline = IsOfflineEngine;
+        var previousStop = _captureStopped.IsCompletedSuccessfully ? Task.CompletedTask : _captureStopped;
+        _preparationTask = Task.Run(async () =>
         {
-            StatusMessage = "Preparing resident offline translation...";
-            try { await _offlineProvider.WarmAsync(SourceLanguage, cancellationToken: token); }
-            catch (OperationCanceledException) { return; }
-            catch (Exception ex) { StatusMessage = ex.Message; StopPlay(); return; }
-            if (token.IsCancellationRequested || !IsPlaying) return;
+            await previousStop.ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            _pipeline.Reset();
+            _pipeline.BindCapture(region, listMode, onlyIfUnbound: true);
+            if (offline) await _offlineProvider.WarmAsync(language, cancellationToken: token).ConfigureAwait(false);
+        }, token);
+        if (offline) StatusMessage = "Preparing resident offline translation...";
+        try { await _preparationTask; }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+        catch (Exception ex)
+        {
+            if (!_disposed && !token.IsCancellationRequested) { StatusMessage = ex.Message; StopPlay(); }
+            return;
         }
+        if (_disposed || token.IsCancellationRequested || !IsPlaying) return;
         StatusMessage = "Translation on. F8 stops it. F10 opens the program.";
         if (MinimizeDuringPlay)
         {
             MinimizeRequested?.Invoke(this, EventArgs.Empty);
         }
 
-        _ = Task.Run(() => PlayLoopAsync(token));
+        _playTask = Task.Run(() => PlayLoopAsync(token));
         TogglePlayCommand.RaiseCanExecuteChanged();
     }
 
     private void StopPlay()
     {
+        var cancellation = _playCts;
+        _playCts = null;
         try
         {
-            _playCts?.Cancel();
+            cancellation?.Cancel();
         }
         catch (Exception ex)
         {
@@ -149,8 +164,24 @@ public sealed partial class PlayViewModel
 
         IsPlaying = false;
         _renderMeasurement?.Dispose(); _renderMeasurement = null;
-        _pipeline.StopCapture();
+        _pipeline.Reset();
         _overlayService.Hide();
+        _captureStopped = StopCaptureAsync(
+            _captureStopped.IsCompletedSuccessfully ? Task.CompletedTask : _captureStopped,
+            _preparationTask.IsCompletedSuccessfully ? Task.CompletedTask : _preparationTask,
+            _playTask.IsCompletedSuccessfully ? Task.CompletedTask : _playTask, cancellation);
+    }
+
+    private async Task StopCaptureAsync(Task previousStop, Task preparation, Task playback, CancellationTokenSource? cancellation)
+    {
+        try { await Task.WhenAll(previousStop, preparation, playback).ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { AppLog.Write("play-stop", ex); }
+        finally
+        {
+            try { await Task.Run(_pipeline.StopCapture).ConfigureAwait(false); }
+            finally { cancellation?.Dispose(); }
+        }
     }
 
     private async Task PlayLoopAsync(CancellationToken token)
@@ -224,7 +255,6 @@ public sealed partial class PlayViewModel
         }
 
         _isBusy = true;
-        RunOnUi(() => TogglePlayCommand.RaiseCanExecuteChanged());
 
         try
         {
@@ -241,18 +271,15 @@ public sealed partial class PlayViewModel
                 listMode,
                 cancellationToken);
 
-            RunOnUi(() => PublishResult(result, cancellationToken));
+            QueuePublication(result, cancellationToken);
         }
         finally
         {
             _isBusy = false;
             try
             {
-                if (!_disposed)
-                {
-                    RunOnUi(() => TogglePlayCommand.RaiseCanExecuteChanged());
-                    _runLock.Release();
-                }
+                _runLock.Release();
+                if (!_disposed && !IsPlaying) RunOnUi(() => TogglePlayCommand.RaiseCanExecuteChanged());
             }
             catch (ObjectDisposedException)
             {
@@ -262,15 +289,31 @@ public sealed partial class PlayViewModel
 
     private void OnPipelineResultAvailable(PipelineResult result)
     {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (_disposed || dispatcher is null || dispatcher.HasShutdownStarted) return;
-        dispatcher.BeginInvoke(() => PublishResult(result, _playCts?.Token ?? CancellationToken.None), DispatcherPriority.Render);
+        if (_disposed || !IsPlaying) return;
+        QueuePublication(result, _activePlayToken);
+    }
+
+    private sealed record Publication(PipelineResult Result, CancellationToken Token);
+    private Publication? _pendingPublication;
+    private int _publicationScheduled;
+
+    private void QueuePublication(PipelineResult result, CancellationToken token)
+    {
+        if (_disposed || token.IsCancellationRequested || _dispatcher.HasShutdownStarted) return;
+        Interlocked.Exchange(ref _pendingPublication, new(result, token));
+        if (Interlocked.Exchange(ref _publicationScheduled, 1) != 0) return;
+        _dispatcher.BeginInvoke(() =>
+        {
+            var pending = Interlocked.Exchange(ref _pendingPublication, null);
+            Interlocked.Exchange(ref _publicationScheduled, 0);
+            if (pending is not null) PublishResult(pending.Result, pending.Token);
+        }, DispatcherPriority.Render);
     }
 
     private void PublishResult(PipelineResult result, CancellationToken cancellationToken)
     {
         var latest = _pipeline.LatestResult;
-        if (_disposed || cancellationToken.IsCancellationRequested || result.Sequence != _pipeline.CurrentSequence
+        if (_disposed || !IsPlaying || cancellationToken.IsCancellationRequested || result.Sequence != _pipeline.CurrentSequence
             || result.CompletedTimestamp < latest.CompletedTimestamp) return;
         var publication = Stopwatch.GetTimestamp();
         if (result.ClearOverlay)
@@ -300,7 +343,12 @@ public sealed partial class PlayViewModel
         }
         StatusMessage = result.Status;
     }
-    private static void RunOnUi(Action action) => UiDispatch.Run(action);
+    private void RunOnUi(Action action)
+    {
+        if (_disposed || _dispatcher.HasShutdownStarted) return;
+        if (_dispatcher.CheckAccess()) action();
+        else _dispatcher.BeginInvoke(action, DispatcherPriority.Background);
+    }
 
     private OverlaySettings CreateOverlaySettings()
     {

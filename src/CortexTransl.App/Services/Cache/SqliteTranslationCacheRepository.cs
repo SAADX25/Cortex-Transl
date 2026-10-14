@@ -22,7 +22,7 @@ public sealed class SqliteTranslationCacheRepository : ITranslationCacheReposito
         string provider,
         CancellationToken cancellationToken = default)
     {
-        var hash = TextHasher.Sha256(sourceText);
+        var hash = TextHasher.TranslationKey(sourceText);
 
         try
         {
@@ -37,12 +37,14 @@ public sealed class SqliteTranslationCacheRepository : ITranslationCacheReposito
                   AND SourceLanguage = $sourceLanguage
                   AND TargetLanguage = $targetLanguage
                   AND Provider = $provider
+                  AND CacheVersion = $version
                 LIMIT 1;
                 """;
             command.Parameters.AddWithValue("$hash", hash);
             command.Parameters.AddWithValue("$sourceLanguage", sourceLanguage);
             command.Parameters.AddWithValue("$targetLanguage", targetLanguage);
             command.Parameters.AddWithValue("$provider", provider);
+            command.Parameters.AddWithValue("$version", TranslationCacheVersion.Current);
 
             long? id = null;
             string? translatedText = null;
@@ -84,7 +86,8 @@ public sealed class SqliteTranslationCacheRepository : ITranslationCacheReposito
         CancellationToken cancellationToken = default)
     {
         var now = DateTimeOffset.UtcNow.ToString("O");
-        var hash = TextHasher.Sha256(sourceText);
+        sourceText = OcrTextCanonicalizer.Normalize(sourceText);
+        var hash = TextHasher.TranslationKey(sourceText);
 
         try
         {
@@ -94,20 +97,22 @@ public sealed class SqliteTranslationCacheRepository : ITranslationCacheReposito
             await using var command = connection.CreateCommand();
             command.CommandText = """
                 INSERT INTO TranslationCache
-                    (SourceTextHash, SourceText, SourceLanguage, TargetLanguage, Provider, TranslatedText, CreatedUtc, LastUsedUtc, HitCount)
+                    (SourceTextHash, SourceText, SourceLanguage, TargetLanguage, Provider, TranslatedText, CreatedUtc, LastUsedUtc, HitCount, CacheVersion)
                 VALUES
-                    ($hash, $sourceText, $sourceLanguage, $targetLanguage, $provider, $translatedText, $now, $now, 0)
+                    ($hash, $sourceText, $sourceLanguage, $targetLanguage, $provider, $translatedText, $now, $now, 0, $version)
                 ON CONFLICT(SourceTextHash, SourceLanguage, TargetLanguage, Provider)
                 DO UPDATE SET
                     SourceText = excluded.SourceText,
                     TranslatedText = excluded.TranslatedText,
-                    LastUsedUtc = excluded.LastUsedUtc;
+                    LastUsedUtc = excluded.LastUsedUtc,
+                    CacheVersion = excluded.CacheVersion;
                 """;
             command.Parameters.AddWithValue("$hash", hash);
             command.Parameters.AddWithValue("$sourceText", sourceText);
             command.Parameters.AddWithValue("$sourceLanguage", sourceLanguage);
             command.Parameters.AddWithValue("$targetLanguage", targetLanguage);
             command.Parameters.AddWithValue("$provider", provider);
+            command.Parameters.AddWithValue("$version", TranslationCacheVersion.Current);
             command.Parameters.AddWithValue("$translatedText", translatedText);
             command.Parameters.AddWithValue("$now", now);
 

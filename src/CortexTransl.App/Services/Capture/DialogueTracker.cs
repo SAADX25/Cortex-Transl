@@ -5,7 +5,7 @@ namespace CortexTransl.App.Services.Capture;
 
 public sealed record DialogueObservation(long Sequence, string Text, bool Changed, bool Ready, bool Clear);
 
-// Monotonic time and exact text comparisons: semantic edits are never swallowed.
+// Monotonic debouncing; only OCR noise and typographic equivalents are ignored.
 public sealed class DialogueTracker(TimeProvider? timeProvider = null)
 {
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
@@ -14,14 +14,18 @@ public sealed class DialogueTracker(TimeProvider? timeProvider = null)
     private int _observations;
     private bool _expired;
     private bool _progressive;
+    private ulong? _visualSignature;
+    private long _visualChangedAt;
+    private int _visualObservations;
     public bool RequiresOcrConfirmation => _candidate.Length > 0 && _observations < 2;
     public long Sequence { get; private set; }
     public StorySettings Settings { get; set; } = new();
 
-    public DialogueObservation Observe(string text, bool ocrFailed = false, bool freshObservation = true)
+    public DialogueObservation Observe(string text, bool ocrFailed = false, bool freshObservation = true,
+        ulong? visualSignature = null)
     {
         var now = _clock.GetTimestamp();
-        text = OcrTextCanonicalizer.Normalize(text);
+        text = OcrTextCanonicalizer.Normalize(text, preserveLineBreaks: true);
         if (text.Length == 0)
         {
             var grace = ocrFailed ? Settings.OcrFailureGraceMilliseconds : Settings.DisappearanceGraceMilliseconds;
@@ -31,6 +35,9 @@ public sealed class DialogueTracker(TimeProvider? timeProvider = null)
                 Reset();
                 return new(Sequence, "", true, false, true);
             }
+            _observations = 0;
+            _visualObservations = 0;
+            _changedAt = now;
             return new(Sequence, _candidate, false, false, _candidate.Length == 0 || _expired);
         }
 
@@ -39,35 +46,42 @@ public sealed class DialogueTracker(TimeProvider? timeProvider = null)
             && Elapsed(_changedAt, now) < Settings.EffectiveStability)
             return new(Sequence, _candidate, false, false, _expired);
 
-        var changed = !_candidate.Equals(text, StringComparison.Ordinal);
+        var comparison = TextSimilarity.Classify(_candidate, text);
+        var changed = comparison != DialogueStability.Unchanged;
         if (changed)
         {
-            _progressive = _candidate.Length > 0 && !TextSimilarity.LooksComplete(_candidate)
-                && text.StartsWith(_candidate, StringComparison.Ordinal);
+            _progressive = _candidate.Length > 0 && text.StartsWith(_candidate, StringComparison.Ordinal);
             Sequence++;
             _candidate = text;
             _changedAt = _firstSeen = now;
             _observations = 0;
             _expired = false;
         }
+        if (visualSignature.HasValue && _visualSignature != visualSignature)
+        {
+            _visualChangedAt = now;
+            _visualObservations = 0;
+        }
+        if (visualSignature.HasValue) _visualObservations++;
+        _visualSignature = visualSignature;
         if (freshObservation) _observations++;
         if (Elapsed(_firstSeen, now) >= Math.Clamp(Settings.MaximumVisibilityMilliseconds, 500, 60000))
         {
             if (!_expired) Sequence++;
             _expired = true;
         }
-        // Complete short exclamations are immediately eligible. Unpunctuated or
-        // growing text must settle across at least two observations.
-        var complete = TextSimilarity.LooksComplete(text);
+        // Punctuation can occur mid-typewriter sequence. Even short exclamations
+        // require independent, consecutive OCR frames and a quiet visual window.
+        var complete = TextSimilarity.LooksComplete(_candidate);
         var quietPeriod = complete ? Settings.EffectiveCompletedStability : Settings.EffectiveStability;
-        if (Settings.FastSubtitles)
-        {
-            if (_progressive) quietPeriod = Math.Max(quietPeriod, complete ? 80 : 180);
-            else if (_observations >= 3) quietPeriod = Math.Min(quietPeriod, complete ? 50 : 120);
-        }
-        var ready = !_expired && ((complete && text.Length <= 16)
-            || (_observations >= 2 && Elapsed(_changedAt, now) >= quietPeriod));
-        return new(Sequence, text, changed, ready, changed || _expired);
+        if (_progressive) quietPeriod = Math.Max(quietPeriod, Settings.FastSubtitles ? 180 : 250);
+        var visualReady = !visualSignature.HasValue
+            || (_visualObservations >= 2 && Elapsed(_visualChangedAt, now) >= quietPeriod)
+            // Dark animated scenery can change the mask despite identical OCR.
+            // Three independent readings plus the full text window confirm it.
+            || (_observations >= 3 && Elapsed(_changedAt, now) >= Settings.EffectiveStability);
+        var ready = !_expired && _observations >= 2 && visualReady && Elapsed(_changedAt, now) >= quietPeriod;
+        return new(Sequence, _candidate, changed, ready, changed || _expired);
     }
 
     public void Reset()
@@ -77,6 +91,8 @@ public sealed class DialogueTracker(TimeProvider? timeProvider = null)
         _observations = 0;
         _expired = false;
         _progressive = false;
+        _visualSignature = null;
+        _visualObservations = 0;
     }
 
     private double Elapsed(long start, long end) => _clock.GetElapsedTime(start, end).TotalMilliseconds;
